@@ -237,24 +237,72 @@ return {
 
 ---
 
-## Deploy en producción
+## Deploy en producción — ESTADO ACTUAL ✅
 
-```bash
-# En el servidor de n8n
-cd /path/to/expedition-mcp
-npm install --production
-npm run build
+### Arquitectura real del servidor (VPS IP: 72.60.166.131)
 
-# Correr con PM2
-pm2 start dist/index.js --name expedition-mcp
-pm2 save
-pm2 startup   # para que arranque con el servidor
+```
+Internet (80/443)
+    ↓
+root-traefik-1   ← Traefik principal (docker-compose en /root)
+    ↓ labels Docker
+root-expedition-mcp-1   ← contenedor MCP (imagen de Dokploy)
+    puerto interno: 3002
 ```
 
-### Verificar que funciona
+**El MCP NO usa Dokploy para el routing** — está en `/root/docker-compose.yml`
+junto con n8n y Traefik. Dokploy buildeó la imagen pero el contenedor
+de producción lo corre el compose de `/root`.
+
+### Por qué no se usó Dokploy para el routing
+- Dokploy instala su propio Traefik en puertos 8080/8443
+- El Traefik real (que recibe tráfico de internet) está en 80/443 en `/root/docker-compose.yml`
+- El tráfico nunca llegaba al Traefik de Dokploy
+- Solución: agregar el MCP directamente al `docker-compose.yml` de `/root`
+
+### Bloque en /root/docker-compose.yml
+```yaml
+  expedition-mcp:
+    image: mcp-server-expedition-jgateo:latest   # imagen buildeada por Dokploy
+    restart: always
+    environment:
+      - EXPEDITION_API_URL=https://api.expeditionapi.com/v1
+      - EXPEDITION_API_TOKEN=${EXPEDITION_API_TOKEN}
+      - SERVER_DOMAIN=https://mcp.voyagers.travel
+      - PORT=3002
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.expedition-mcp.rule=Host(`mcp.voyagers.travel`)
+      - traefik.http.routers.expedition-mcp.tls=true
+      - traefik.http.routers.expedition-mcp.entrypoints=websecure
+      - traefik.http.routers.expedition-mcp.tls.certresolver=mytlschallenge
+      - traefik.http.services.expedition-mcp.loadbalancer.server.port=3002
+```
+
+### SSL
+- Let's Encrypt TLS challenge falla porque el dominio pasa por Cloudflare
+- **No es problema**: Cloudflare maneja el SSL de cara al usuario (cert válido)
+- La conexión Cloudflare → VPS va sin cert de LE pero funciona correctamente
+
+### Verificado y funcionando
 ```bash
-curl http://localhost:3001/health
-# → { "status": "ok", "server": "expedition-mcp" }
+curl https://mcp.voyagers.travel/health
+# → {"status":"ok","server":"expedition-mcp"}
+
+curl -s https://mcp.voyagers.travel/mcp \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}'
+# → 7 tools listados ✅
+```
+
+### Para actualizar cuando haya cambios en el código
+```bash
+# 1. Push a GitHub → Dokploy hace rebuild automático de la imagen
+# 2. En el servidor:
+cd /root && docker compose up -d expedition-mcp
+# Esto recarga el contenedor con la nueva imagen
 ```
 
 ---

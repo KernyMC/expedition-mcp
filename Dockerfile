@@ -5,7 +5,7 @@ COPY package*.json tsconfig.json ./
 RUN npm ci
 
 COPY src ./src
-RUN npm run build
+RUN node --max-old-space-size=512 node_modules/.bin/tsc
 
 # ─── Production image ────────────────────────────────────────────────────────
 FROM node:22-alpine

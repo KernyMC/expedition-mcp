@@ -4,283 +4,294 @@ import type { Itinerary } from '../api/expedition';
 const LOGO_URL =
   'https://dynamic-media-cdn.tripadvisor.com/media/photo-o/2c/cb/08/0b/caption.jpg?w=400&h=-1&s=1';
 
-// ─── Palette ─────────────────────────────────────────────────────────────────
-const DARK    = '#2f3031';
-const GOLD    = '#c8a45a';
-const WHITE   = '#ffffff';
-const LIGHT   = '#f7f6f4';
-const MUTED   = '#888888';
-const GREEN   = '#2e7d5e';  // included items
-const RED     = '#b03030';  // not included items
+// ─── Palette ──────────────────────────────────────────────────────────────────
+const DARK  = '#2f3031';
+const GOLD  = '#c8a45a';
+const WHITE = '#ffffff';
+const LIGHT = '#f7f6f4';
+const MUTED = '#888888';
+const GREEN = '#2e7d5e';
+const RED   = '#b03030';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── A4 layout constants ──────────────────────────────────────────────────────
+const PW = 595.28;   // page width
+const PH = 841.89;   // page height
+const M  = 50;       // left/right margin
+const CW = PW - M * 2;  // content width = 495.28
 
-function stripHtml(html: string): string {
-  return html
+const FOOTER_H  = 58;          // footer band height
+const FOOTER_Y  = PH - FOOTER_H; // = 783.89
+const SAFE_Y    = FOOTER_Y - 8;  // content must not exceed this
+
+// ─── HTML stripping (comprehensive) ──────────────────────────────────────────
+
+function stripHtml(raw: string | null | undefined): string {
+  if (!raw) return '';
+  return raw
+    // Block-level closing tags → newline
+    .replace(/<\/(p|div|h[1-6]|li|tr|td|th|section|article|blockquote)>/gi, '\n')
+    // Self-closing and opening block tags → newline
     .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&rsquo;/g, "'")
-    .replace(/&ldquo;/g, '"')
-    .replace(/&rdquo;/g, '"')
-    .replace(/\n{3,}/g, '\n\n')
+    // Remove ALL remaining tags (including inline styles, class, etc.)
+    .replace(/<[^>]*>/g, '')
+    // Named HTML entities
+    .replace(/&amp;/g,    '&')
+    .replace(/&lt;/g,     '<')
+    .replace(/&gt;/g,     '>')
+    .replace(/&nbsp;/g,   ' ')
+    .replace(/&rsquo;/g,  '\u2019')
+    .replace(/&lsquo;/g,  '\u2018')
+    .replace(/&rdquo;/g,  '\u201D')
+    .replace(/&ldquo;/g,  '\u201C')
+    .replace(/&mdash;/g,  '\u2014')
+    .replace(/&ndash;/g,  '\u2013')
+    .replace(/&hellip;/g, '\u2026')
+    .replace(/&apos;/g,   "'")
+    .replace(/&quot;/g,   '"')
+    // Decimal numeric entities: &#39; &#160; etc.
+    .replace(/&#(\d+);/g,    (_, n) => String.fromCharCode(Number(n)))
+    // Hex numeric entities: &#x27; etc.
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    // Normalise whitespace
+    .replace(/[ \t]+/g,  ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g,  '\n\n')
     .trim();
 }
 
-async function fetchLogoBuffer(): Promise<Buffer | null> {
+// ─── Logo fetch ───────────────────────────────────────────────────────────────
+
+async function fetchLogo(): Promise<Buffer | null> {
   try {
     const res = await fetch(LOGO_URL, {
-      headers: { 'User-Agent': 'Mozilla/5.0' },
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'image/jpeg,image/png,image/*,*/*',
+        'Referer': 'https://www.tripadvisor.com/',
+      },
     });
     if (!res.ok) return null;
-    return Buffer.from(await res.arrayBuffer());
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 100) return null; // guard against empty/error responses
+    return buf;
   } catch {
     return null;
   }
 }
 
-function sectionHeader(doc: PDFKit.PDFDocument, title: string) {
+// ─── Layout helpers ───────────────────────────────────────────────────────────
+
+/** Add a new page only when remaining space is insufficient */
+function needSpace(doc: PDFKit.PDFDocument, required: number) {
+  if (doc.y + required > SAFE_Y) doc.addPage();
+}
+
+/** Dark bar with gold label */
+function sectionBar(doc: PDFKit.PDFDocument, title: string) {
+  needSpace(doc, 40);
   const y = doc.y;
-  doc.rect(50, y, doc.page.width - 100, 24).fill(DARK);
-  doc
-    .fill(GOLD)
-    .fontSize(11)
-    .font('Helvetica-Bold')
-    .text(title.toUpperCase(), 60, y + 7, { width: doc.page.width - 120 });
-  doc.y = y + 32;
+  doc.rect(M, y, CW, 22).fill(DARK);
+  doc.fill(GOLD).fontSize(10).font('Helvetica-Bold')
+     .text(title.toUpperCase(), M + 8, y + 7, { width: CW - 16 });
+  doc.y = y + 28;
 }
 
-function divider(doc: PDFKit.PDFDocument) {
-  doc
-    .moveTo(50, doc.y)
-    .lineTo(doc.page.width - 50, doc.y)
-    .strokeColor(GOLD)
-    .lineWidth(0.5)
-    .stroke();
-  doc.moveDown(0.6);
+/** Footer stamped on every page */
+function stampFooter(doc: PDFKit.PDFDocument) {
+  doc.rect(0, FOOTER_Y, PW, FOOTER_H).fill(DARK);
+  doc.rect(0, FOOTER_Y, PW, 3).fill(GOLD);
+  doc.fill(WHITE).fontSize(9).font('Helvetica-Bold')
+     .text('voyagers.travel  ·  info@voyagers.travel', M, FOOTER_Y + 14, {
+       align: 'center', width: CW,
+     });
+  doc.fill(MUTED).fontSize(7.5).font('Helvetica')
+     .text(
+       `Generated ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`,
+       M, FOOTER_Y + 33, { align: 'center', width: CW }
+     );
 }
 
-const FOOTER_HEIGHT = 65; // reserved at bottom of every page for footer
-
-function ensureSpace(doc: PDFKit.PDFDocument, needed = 100) {
-  if (doc.y > doc.page.height - Math.max(needed, FOOTER_HEIGHT)) doc.addPage();
-}
-
-// ─── Main ────────────────────────────────────────────────────────────────────
+// ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function generateBrochurePDF(itinerary: Itinerary): Promise<string> {
-  const logoBuffer = await fetchLogoBuffer();
+  const logoBuffer = await fetchLogo();
 
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    const doc = new PDFDocument({ margin: 0, size: 'A4' });
 
-    doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(chunks).toString('base64')));
+    // bufferPages: true → lets us iterate all pages at the end to stamp footer everywhere
+    const doc = new PDFDocument({ margin: 0, size: 'A4', bufferPages: true });
+
+    doc.on('data',  (c: Buffer) => chunks.push(c));
+    doc.on('end',   () => resolve(Buffer.concat(chunks).toString('base64')));
     doc.on('error', reject);
 
-    const W = doc.page.width;   // 595
-    const H = doc.page.height;  // 842
-    const M = 50;               // margin
+    // ── HEADER ────────────────────────────────────────────────────────────────
+    doc.rect(0, 0, PW, 88).fill(DARK);
+    doc.rect(0, 88, PW, 4).fill(GOLD);
 
-    // ── Cover strip ──────────────────────────────────────────────────────────
-    doc.rect(0, 0, W, 90).fill(DARK);
-
-    // Logo on white pill
+    // Logo on white box
     if (logoBuffer) {
-      doc.rect(M, 14, 160, 62).fill(WHITE);
-      doc.image(logoBuffer, M + 6, 16, { height: 58, fit: [148, 58], align: 'left', valign: 'center' });
+      doc.rect(M, 12, 172, 64).fill(WHITE);
+      try {
+        doc.image(logoBuffer, M + 5, 14, { fit: [162, 60] });
+      } catch {
+        // fallback: text only
+        doc.fill(WHITE).fontSize(18).font('Helvetica-Bold').text('VOYAGERS TRAVEL', M + 6, 34);
+      }
     } else {
-      doc.fill(WHITE).fontSize(18).font('Helvetica-Bold').text('VOYAGERS TRAVEL', M, 34);
+      doc.fill(WHITE).fontSize(18).font('Helvetica-Bold').text('VOYAGERS TRAVEL', M, 32);
     }
 
-    // Tagline on dark strip
-    doc
-      .fill(GOLD)
-      .fontSize(9)
-      .font('Helvetica')
-      .text('Expedition & Adventure Tours', M + 170, 38, { width: W - M - 170 - M, align: 'right' });
+    // Tagline on the right
+    doc.fill(GOLD).fontSize(9).font('Helvetica')
+       .text('Expedition & Adventure Tours', M + 180, 40, {
+         width: PW - M - 180 - M, align: 'right',
+       });
 
-    // ── Gold bar under header ─────────────────────────────────────────────────
-    doc.rect(0, 90, W, 5).fill(GOLD);
+    // ── TITLE BLOCK ───────────────────────────────────────────────────────────
+    // Dynamic height: measure title first
+    const titleFontSize = itinerary.title.length > 60 ? 16 : 19;
+    doc.rect(0, 92, PW, 88).fill(LIGHT);
 
-    // ── Title block ───────────────────────────────────────────────────────────
-    doc.rect(0, 95, W, 80).fill(LIGHT);
+    doc.fill(DARK).fontSize(titleFontSize).font('Helvetica-Bold')
+       .text(itinerary.title, M, 104, { width: CW, align: 'center' });
 
-    doc
-      .fill(DARK)
-      .fontSize(18)
-      .font('Helvetica-Bold')
-      .text(itinerary.title, M, 108, { width: W - M * 2, align: 'center' });
+    doc.fill(GOLD).fontSize(11).font('Helvetica')
+       .text(
+         `${itinerary.duration} Days  ·  ${itinerary.destination}`,
+         M, 154, { width: CW, align: 'center' }
+       );
 
-    doc
-      .fill(GOLD)
-      .fontSize(11)
-      .font('Helvetica')
-      .text(
-        `${itinerary.duration} Days  ·  ${itinerary.destination}`,
-        M,
-        152,
-        { width: W - M * 2, align: 'center' }
-      );
+    doc.y = 190;
 
-    doc.y = 185;
-
-    // ── Short Description ─────────────────────────────────────────────────────
+    // ── SHORT DESCRIPTION ─────────────────────────────────────────────────────
     if (itinerary.shortDescription) {
       const desc = stripHtml(itinerary.shortDescription);
-      doc
-        .fill(DARK)
-        .fontSize(10)
-        .font('Helvetica-Oblique')
-        .text(desc, M, doc.y, { width: W - M * 2, align: 'justify' });
-      doc.moveDown(0.8);
+      if (desc) {
+        doc.fill(DARK).fontSize(10).font('Helvetica-Oblique')
+           .text(desc, M, doc.y, { width: CW, align: 'justify' });
+        doc.moveDown(0.7);
+      }
     }
 
-    divider(doc);
+    // Thin gold divider
+    doc.moveTo(M, doc.y).lineTo(PW - M, doc.y)
+       .strokeColor(GOLD).lineWidth(0.5).stroke();
+    doc.moveDown(0.6);
 
-    // ── Highlights ────────────────────────────────────────────────────────────
+    // ── HIGHLIGHTS ────────────────────────────────────────────────────────────
     if (itinerary.highlights?.length) {
-      sectionHeader(doc, 'Tour Highlights');
-      const colW = (W - M * 2 - 20) / 2;
-      const highlights = itinerary.highlights;
-      const half = Math.ceil(highlights.length / 2);
-
-      const leftH  = highlights.slice(0, half);
-      const rightH = highlights.slice(half);
+      sectionBar(doc, 'Tour Highlights');
+      const colW = (CW - 16) / 2;
+      const half = Math.ceil(itinerary.highlights.length / 2);
+      const leftItems  = itinerary.highlights.slice(0, half);
+      const rightItems = itinerary.highlights.slice(half);
       const startY = doc.y;
 
-      // left column
       doc.fill(DARK).fontSize(9).font('Helvetica');
-      leftH.forEach((h) => {
-        doc.text(`▸  ${h}`, M, doc.y, { width: colW });
-      });
+      leftItems.forEach(h => { doc.text(`▸  ${stripHtml(h)}`, M, doc.y, { width: colW }); });
       const afterLeft = doc.y;
 
-      // right column
       doc.y = startY;
-      rightH.forEach((h) => {
-        doc.text(`▸  ${h}`, M + colW + 20, doc.y, { width: colW });
-      });
+      rightItems.forEach(h => { doc.text(`▸  ${stripHtml(h)}`, M + colW + 16, doc.y, { width: colW }); });
 
       doc.y = Math.max(afterLeft, doc.y);
       doc.moveDown(0.8);
     }
 
-    // ── Includes / Not Included ───────────────────────────────────────────────
-    if (itinerary.includes?.length || itinerary.notInclude?.length) {
-      ensureSpace(doc, 120);
-      const colW = (W - M * 2 - 20) / 2;
+    // ── INCLUDES / NOT INCLUDED ───────────────────────────────────────────────
+    const incItems = itinerary.includes || [];
+    const notItems = itinerary.notInclude || [];
 
-      // Included header
+    if (incItems.length || notItems.length) {
+      needSpace(doc, 100);
+      const colW = (CW - 12) / 2;
       const startY = doc.y;
+
+      // Green "Included" header
       doc.rect(M, startY, colW, 22).fill(GREEN);
-      doc.fill(WHITE).fontSize(10).font('Helvetica-Bold').text("What's Included", M + 8, startY + 6, { width: colW - 10 });
+      doc.fill(WHITE).fontSize(10).font('Helvetica-Bold')
+         .text("What's Included", M + 6, startY + 6, { width: colW - 8 });
 
-      // Not included header
-      doc.rect(M + colW + 20, startY, colW, 22).fill(RED);
-      doc.fill(WHITE).fontSize(10).font('Helvetica-Bold').text('Not Included', M + colW + 28, startY + 6, { width: colW - 10 });
+      // Red "Not Included" header
+      doc.rect(M + colW + 12, startY, colW, 22).fill(RED);
+      doc.fill(WHITE).fontSize(10).font('Helvetica-Bold')
+         .text('Not Included', M + colW + 18, startY + 6, { width: colW - 8 });
 
-      doc.y = startY + 28;
-      const itemStart = doc.y;
-
-      // Left: included items
+      const itemsY = startY + 28;
       doc.fill(DARK).fontSize(9).font('Helvetica');
-      (itinerary.includes || []).forEach((item) => {
-        doc.text(`✓  ${item}`, M, doc.y, { width: colW });
+
+      // Left column
+      doc.y = itemsY;
+      incItems.forEach(item => {
+        doc.text(`✓  ${stripHtml(item)}`, M, doc.y, { width: colW });
       });
       const afterLeft = doc.y;
 
-      // Right: not included items
-      doc.y = itemStart;
-      (itinerary.notInclude || []).forEach((item) => {
-        doc.text(`✗  ${item}`, M + colW + 20, doc.y, { width: colW });
+      // Right column — reset Y to same start
+      doc.y = itemsY;
+      notItems.forEach(item => {
+        doc.text(`✗  ${stripHtml(item)}`, M + colW + 12, doc.y, { width: colW });
       });
 
       doc.y = Math.max(afterLeft, doc.y);
-      doc.moveDown(0.8);
+      doc.moveDown(1);
     }
 
-    // ── Daily Itinerary ───────────────────────────────────────────────────────
+    // ── DAILY ITINERARY ───────────────────────────────────────────────────────
     if (itinerary.days?.length) {
-      ensureSpace(doc, 80);
-      sectionHeader(doc, 'Daily Itinerary');
+      needSpace(doc, 60);
+      sectionBar(doc, 'Daily Itinerary');
 
-      itinerary.days.forEach((day) => {
-        ensureSpace(doc, 80);
+      itinerary.days.forEach(day => {
+        needSpace(doc, 70);
 
-        // Day title bar
+        // Day title row
         const dayY = doc.y;
-        doc.rect(M, dayY, W - M * 2, 20).fill(LIGHT);
-        doc
-          .fill(DARK)
-          .fontSize(10)
-          .font('Helvetica-Bold')
-          .text(`Day ${day.day}  –  ${day.title}`, M + 8, dayY + 5, { width: W - M * 2 - 16 });
+        doc.rect(M, dayY, CW, 20).fill(LIGHT);
+        doc.fill(DARK).fontSize(10).font('Helvetica-Bold')
+           .text(`Day ${day.day}  –  ${day.title}`, M + 8, dayY + 5, { width: CW - 16 });
         doc.y = dayY + 26;
 
         if (day.details) {
           const details = stripHtml(day.details);
-          doc
-            .fill(DARK)
-            .fontSize(9)
-            .font('Helvetica')
-            .text(details, M, doc.y, { width: W - M * 2, align: 'justify' });
+          if (details) {
+            needSpace(doc, 20);
+            doc.fill(DARK).fontSize(9).font('Helvetica')
+               .text(details, M, doc.y, { width: CW, align: 'justify' });
+          }
         }
 
         if (day.meals?.length) {
-          doc
-            .fill(MUTED)
-            .fontSize(8)
-            .font('Helvetica-Oblique')
-            .text(`Meals: ${day.meals.join(', ')}`, M, doc.y, { width: W - M * 2 });
+          doc.fill(MUTED).fontSize(8).font('Helvetica-Oblique')
+             .text(`Meals: ${day.meals.join(', ')}`, M, doc.y, { width: CW });
         }
 
-        doc.moveDown(0.6);
+        doc.moveDown(0.5);
       });
     }
 
-    // ── Vessels ───────────────────────────────────────────────────────────────
+    // ── VESSELS ───────────────────────────────────────────────────────────────
     if (itinerary.cruise?.length) {
-      ensureSpace(doc, 60);
-      sectionHeader(doc, 'Vessels');
-      itinerary.cruise.forEach((c) => {
-        doc.fill(DARK).fontSize(10).font('Helvetica').text(`▸  ${c.name}`, M, doc.y, { width: W - M * 2 });
+      needSpace(doc, 60);
+      sectionBar(doc, 'Vessels');
+      itinerary.cruise.forEach(c => {
+        doc.fill(DARK).fontSize(10).font('Helvetica')
+           .text(`▸  ${c.name}`, M, doc.y, { width: CW });
       });
       doc.moveDown(0.8);
     }
 
-    // ── Footer on last page ────────────────────────────────────────────────────
-    // If content already passed the footer zone, add a new page for the footer
-    if (doc.y > H - FOOTER_HEIGHT) doc.addPage();
-    const footerY = H - 55;
-    doc.rect(0, footerY, W, 55).fill(DARK);
-    doc.rect(0, footerY, W, 4).fill(GOLD);
+    // ── FOOTER ON EVERY PAGE ──────────────────────────────────────────────────
+    const range = doc.bufferedPageRange();
+    for (let i = 0; i < range.count; i++) {
+      doc.switchToPage(range.start + i);
+      stampFooter(doc);
+    }
 
-    doc
-      .fill(WHITE)
-      .fontSize(9)
-      .font('Helvetica-Bold')
-      .text('voyagers.travel  ·  info@voyagers.travel', M, footerY + 16, {
-        align: 'center',
-        width: W - M * 2,
-      });
-
-    doc
-      .fill(MUTED)
-      .fontSize(7.5)
-      .font('Helvetica')
-      .text(
-        `Generated on ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`,
-        M,
-        footerY + 33,
-        { align: 'center', width: W - M * 2 }
-      );
-
+    doc.flushPages();
     doc.end();
   });
 }

@@ -111,7 +111,11 @@ server.registerTool(
   },
   async ({ origin, cruise }) => {
     const tours = await listTours(origin, cruise);
-    return { content: [{ type: 'text', text: JSON.stringify(tours, null, 2) }] };
+    // Return only essential fields — shortDescription is verbose across many tours
+    const slim = tours.map(({ title, url, destination, duration }) => ({
+      title, url, destination, duration,
+    }));
+    return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
   }
 );
 
@@ -128,7 +132,9 @@ server.registerTool(
   },
   async ({ origin, tour_id }) => {
     const itinerary = await getItinerary(origin, tour_id);
-    return { content: [{ type: 'text', text: JSON.stringify(itinerary, null, 2) }] };
+    // Strip images array — URLs are useless to the LLM and waste context
+    const { images: _images, ...slim } = itinerary;
+    return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
   }
 );
 

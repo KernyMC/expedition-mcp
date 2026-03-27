@@ -150,7 +150,7 @@ server.registerTool(
   'list_tours',
   {
     description:
-      'List available tours for a given origin. Optionally filter by cruise name. Returns tour IDs needed for get_itinerary and generate_brochure.',
+      'List available tours for a given origin. Optionally filter by cruise name. Each result has a "url" field — pass that exact value as tour_id to get_itinerary or generate_brochure.',
     inputSchema: {
       origin: z
         .enum(['galapagos', 'antarctica'])
@@ -175,14 +175,21 @@ server.registerTool(
       'Get the full itinerary details for a specific tour: day-by-day program, includes, highlights, and vessel info.',
     inputSchema: {
       origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
-      tour_id: z.string().describe('Tour URL/ID from list_tours'),
+      tour_id: z.string().describe('The exact "url" value returned by list_tours'),
     },
     annotations: { readOnlyHint: true },
   },
   async ({ origin, tour_id }) => {
-    const itinerary = await getItinerary(origin, tour_id);
-    const { images: _images, ...slim } = itinerary;
-    return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
+    try {
+      const itinerary = await getItinerary(origin, tour_id);
+      const { images: _images, ...slim } = itinerary;
+      return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error fetching itinerary: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
   }
 );
 
@@ -194,31 +201,38 @@ server.registerTool(
   'generate_brochure',
   {
     description:
-      'Generate a PDF brochure for a tour and return a download URL. Use this only when the user explicitly requests a brochure or PDF download.',
+      'Generate a PDF brochure for a tour and return a download URL. Use this only when the user explicitly requests a brochure or PDF download. You must call list_tours first to get the exact "url" value to pass as tour_id.',
     inputSchema: {
       origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
-      tour_id: z.string().describe('Tour URL/ID from list_tours'),
+      tour_id: z.string().describe('The exact "url" value returned by list_tours — not the title'),
     },
   },
   async ({ origin, tour_id }) => {
-    const itinerary = await getItinerary(origin, tour_id);
-    const base64 = await generateBrochurePDF(itinerary);
-    const buffer = Buffer.from(base64, 'base64');
-    const filename = `${tour_id}-brochure.pdf`;
-    const id = randomUUID();
+    try {
+      const itinerary = await getItinerary(origin, tour_id);
+      const base64 = await generateBrochurePDF(itinerary);
+      const buffer = Buffer.from(base64, 'base64');
+      const filename = `${tour_id}-brochure.pdf`;
+      const id = randomUUID();
 
-    pdfStore.set(id, {
-      buffer,
-      filename,
-      title: itinerary.title,
-      expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
-    });
+      pdfStore.set(id, {
+        buffer,
+        filename,
+        title: itinerary.title,
+        expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
+      });
 
-    const downloadUrl = `${PUBLIC_URL}/pdf/${id}`;
+      const downloadUrl = `${PUBLIC_URL}/pdf/${id}`;
 
-    return {
-      content: [{ type: 'text', text: `Brochure ready. Download URL: ${downloadUrl}` }],
-    };
+      return {
+        content: [{ type: 'text', text: `Brochure ready. Download URL: ${downloadUrl}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error generating brochure: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
   }
 );
 

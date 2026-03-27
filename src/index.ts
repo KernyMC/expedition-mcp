@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { randomUUID } from 'crypto';
 import express from 'express';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -20,6 +21,25 @@ const server = new McpServer(
       'Use list_cruises or list_tours first to discover available options before calling availability or itinerary tools. Call generate_brochure only when the user explicitly requests a PDF or brochure.',
   }
 );
+
+// ─── Temporary PDF store (30-minute TTL) ────────────────────────────────────
+
+interface PdfEntry {
+  buffer: Buffer;
+  filename: string;
+  title: string;
+  expiresAt: number;
+}
+
+const pdfStore = new Map<string, PdfEntry>();
+
+// Clean up expired entries every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of pdfStore) {
+    if (entry.expiresAt < now) pdfStore.delete(id);
+  }
+}, 10 * 60 * 1000);
 
 // ─── Cruises ────────────────────────────────────────────────────────────────
 
@@ -58,7 +78,7 @@ server.registerTool(
   },
   async ({ cruise_id, start_date }) => {
     const availability = await getCruiseAvailability(cruise_id, start_date) as any;
-    // Strip image URLs, HTML descriptions, gallery, deckPlans, cabin images — keep only what the LLM needs
+    // Strip image URLs, HTML descriptions, gallery, deckPlans — keep only what the LLM needs
     const slim = {
       product: {
         id: availability.product?.id,
@@ -141,7 +161,6 @@ server.registerTool(
   },
   async ({ origin, cruise }) => {
     const tours = await listTours(origin, cruise);
-    // Return only essential fields — shortDescription is verbose across many tours
     const slim = tours.map(({ title, url, destination, duration }) => ({
       title, url, destination, duration,
     }));
@@ -162,7 +181,6 @@ server.registerTool(
   },
   async ({ origin, tour_id }) => {
     const itinerary = await getItinerary(origin, tour_id);
-    // Strip images array — URLs are useless to the LLM and waste context
     const { images: _images, ...slim } = itinerary;
     return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
   }
@@ -170,11 +188,13 @@ server.registerTool(
 
 // ─── Brochure PDF ────────────────────────────────────────────────────────────
 
+const PUBLIC_URL = process.env.SERVER_DOMAIN ?? 'https://mcp.voyagers.travel';
+
 server.registerTool(
   'generate_brochure',
   {
     description:
-      'Generate a PDF brochure for a tour and return it as base64. Use this only when the user explicitly requests a brochure or PDF download.',
+      'Generate a PDF brochure for a tour and return a download URL. Use this only when the user explicitly requests a brochure or PDF download.',
     inputSchema: {
       origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
       tour_id: z.string().describe('Tour URL/ID from list_tours'),
@@ -183,18 +203,21 @@ server.registerTool(
   async ({ origin, tour_id }) => {
     const itinerary = await getItinerary(origin, tour_id);
     const base64 = await generateBrochurePDF(itinerary);
+    const buffer = Buffer.from(base64, 'base64');
     const filename = `${tour_id}-brochure.pdf`;
+    const id = randomUUID();
 
-    // Return a structured marker so n8n can extract the PDF from the tool response
-    const payload = JSON.stringify({
-      type: 'EXPEDITION_PDF_ATTACHMENT',
+    pdfStore.set(id, {
+      buffer,
       filename,
-      base64,
       title: itinerary.title,
+      expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
     });
 
+    const downloadUrl = `${PUBLIC_URL}/pdf/${id}`;
+
     return {
-      content: [{ type: 'text', text: payload }],
+      content: [{ type: 'text', text: `Brochure ready. Download URL: ${downloadUrl}` }],
     };
   }
 );
@@ -206,6 +229,19 @@ app.use(express.json());
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', server: 'expedition-mcp' });
+});
+
+// PDF download endpoint — serves the stored brochure and deletes it after download
+app.get('/pdf/:id', (req, res) => {
+  const entry = pdfStore.get(req.params.id);
+  if (!entry || entry.expiresAt < Date.now()) {
+    res.status(404).json({ error: 'PDF not found or expired' });
+    return;
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${entry.filename}"`);
+  res.send(entry.buffer);
+  pdfStore.delete(req.params.id);
 });
 
 app.post('/mcp', async (req, res) => {

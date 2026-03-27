@@ -66,6 +66,8 @@ server.registerTool(
         type: availability.product?.type,
         capacity: availability.product?.capacity,
         category: availability.product?.category,
+        shortDescription: availability.product?.shortDescription,
+        specifications: availability.product?.specifications,
       },
       dates: (availability.dates ?? []).map((d: any) => ({
         startDate: d.startDate,

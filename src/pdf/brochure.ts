@@ -64,8 +64,10 @@ function divider(doc: PDFKit.PDFDocument) {
   doc.moveDown(0.6);
 }
 
+const FOOTER_HEIGHT = 65; // reserved at bottom of every page for footer
+
 function ensureSpace(doc: PDFKit.PDFDocument, needed = 100) {
-  if (doc.y > doc.page.height - needed) doc.addPage();
+  if (doc.y > doc.page.height - Math.max(needed, FOOTER_HEIGHT)) doc.addPage();
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
@@ -253,6 +255,8 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
     }
 
     // ── Footer on last page ────────────────────────────────────────────────────
+    // If content already passed the footer zone, add a new page for the footer
+    if (doc.y > H - FOOTER_HEIGHT) doc.addPage();
     const footerY = H - 55;
     doc.rect(0, footerY, W, 55).fill(DARK);
     doc.rect(0, footerY, W, 4).fill(GOLD);

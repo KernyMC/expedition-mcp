@@ -235,9 +235,11 @@ app.get('/health', (_req, res) => {
 app.get('/pdf/:id', (req, res) => {
   const entry = pdfStore.get(req.params.id);
   if (!entry || entry.expiresAt < Date.now()) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.status(404).json({ error: 'PDF not found or expired' });
     return;
   }
+  res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="${entry.filename}"`);
   res.send(entry.buffer);

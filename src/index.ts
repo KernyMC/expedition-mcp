@@ -57,8 +57,36 @@ server.registerTool(
     annotations: { readOnlyHint: true },
   },
   async ({ cruise_id, start_date }) => {
-    const availability = await getCruiseAvailability(cruise_id, start_date);
-    return { content: [{ type: 'text', text: JSON.stringify(availability, null, 2) }] };
+    const availability = await getCruiseAvailability(cruise_id, start_date) as any;
+    // Strip image URLs, HTML descriptions, gallery, deckPlans, cabin images — keep only what the LLM needs
+    const slim = {
+      product: {
+        id: availability.product?.id,
+        name: availability.product?.name,
+        type: availability.product?.type,
+        capacity: availability.product?.capacity,
+        category: availability.product?.category,
+      },
+      dates: (availability.dates ?? []).map((d: any) => ({
+        startDate: d.startDate,
+        endDate: d.endDate,
+        days: d.days,
+        nights: d.nights,
+        spaces: d.spaces,
+        rackRate: d.rackRate,
+        promotionalRate: d.promotionalRate,
+        promotionDetails: d.promotionDetails,
+        itinerary: d.itinerary,
+        observation: d.observation,
+        cabins: (d.cabins ?? []).map((c: any) => ({
+          type: c.type,
+          available: c.available,
+          hold: c.hold,
+          price: c.price,
+        })),
+      })),
+    };
+    return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
   }
 );
 

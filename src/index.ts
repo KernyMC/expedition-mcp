@@ -9,6 +9,7 @@ import {
   getCruiseAvailability,
   listHotels,
   getHotelAvailability,
+  listCruiseShips,
   listTours,
   getItinerary,
 } from './api/expedition';
@@ -18,7 +19,19 @@ const server = new McpServer(
   { name: 'expedition-api', version: '0.1.0' },
   {
     instructions:
-      'Use list_cruises or list_tours first to discover available options before calling availability or itinerary tools. Call generate_brochure only when the user explicitly requests a PDF or brochure.',
+      'IMPORTANT — Two separate ID systems exist:\n' +
+      '  • Availability slugs (e.g. "infinity", "seaman-journey"): returned by list_cruises, used ONLY in get_cruise_availability.\n' +
+      '  • Firebase IDs (e.g. "aUyAM5thkArgNV7dXrxJ"): returned by list_ships, used ONLY as the cruise filter in list_tours.\n' +
+      '  • Tour URLs (e.g. "infinity-galapagos-cruise-8-days-itinerary-b"): returned by list_tours, used in get_itinerary and generate_brochure.\n' +
+      '\n' +
+      'Tool usage guide:\n' +
+      '- User asks about tours for a specific ship → list_ships(origin) → find the ship Firebase ID → list_tours(origin, cruise=<firebase_id>)\n' +
+      '- User asks about all tours for a destination → list_tours(origin) without cruise filter\n' +
+      '- User asks about itinerary details / day program → get_itinerary(origin, url) using the "url" from list_tours\n' +
+      '- User asks what ship a tour runs on → get_itinerary() — the "cruise" array in the response lists all vessels\n' +
+      '- User asks about prices, dates, availability → list_cruises(origin) to get slug → get_cruise_availability(slug)\n' +
+      '- User asks for a PDF/brochure → list_tours first to get the url, then generate_brochure(origin, url)\n' +
+      '- NEVER guess IDs — always call the appropriate list tool first.',
   }
 );
 
@@ -47,7 +60,9 @@ server.registerTool(
   'list_cruises',
   {
     description:
-      'List available cruises filtered by origin. Use this before get_cruise_availability to find a cruise ID.',
+      'List cruise vessels filtered by origin. Returns slug-based IDs used ONLY for get_cruise_availability. ' +
+      'These IDs are different from the Firebase IDs used by list_ships/list_tours. ' +
+      'Use this when the user asks about prices, dates, or availability of a vessel.',
     inputSchema: {
       origin: z
         .enum(['galapagos', 'antarctica', 'all'])
@@ -66,9 +81,11 @@ server.registerTool(
   'get_cruise_availability',
   {
     description:
-      'Get real-time availability, pricing, and cabin types for a specific cruise. Requires the cruise ID from list_cruises.',
+      'Get real-time availability, pricing, and cabin types for a specific cruise vessel. ' +
+      'Use the slug-based cruise ID from list_cruises (e.g. "infinity", "seaman-journey"). ' +
+      'Do NOT use Firebase IDs from list_ships here.',
     inputSchema: {
-      cruise_id: z.string().describe('Cruise ID/slug from list_cruises'),
+      cruise_id: z.string().describe('Cruise slug from list_cruises (e.g. "infinity", "seaman-journey")'),
       start_date: z
         .string()
         .optional()
@@ -147,24 +164,51 @@ server.registerTool(
 // ─── Tours / Itineraries ─────────────────────────────────────────────────────
 
 server.registerTool(
-  'list_tours',
+  'list_ships',
   {
     description:
-      'List available tours for a given origin. Optionally filter by cruise name. Each result has a "url" field — pass that exact value as tour_id to get_itinerary or generate_brochure.',
+      'List cruise ships (vessels) that have tours for a destination. Returns Firebase-based IDs — use these IDs ' +
+      'as the cruise filter in list_tours. These IDs are NOT the same as the slugs from list_cruises. ' +
+      'Call this when the user asks about tours for a specific ship (e.g. "tours on the Infinity").',
     inputSchema: {
       origin: z
         .enum(['galapagos', 'antarctica'])
         .describe('Destination origin'),
-      cruise: z.string().optional().describe('Filter by cruise name (optional)'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ origin }) => {
+    try {
+      const ships = await listCruiseShips(origin);
+      return { content: [{ type: 'text', text: JSON.stringify(ships, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error listing ships: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+server.registerTool(
+  'list_tours',
+  {
+    description:
+      'List available tours/itineraries for a destination. ' +
+      'To filter by vessel: first call list_ships to get the ship\'s Firebase ID, then pass it as the cruise parameter here. ' +
+      'Each result includes a "url" field — pass that exact value as tour_id to get_itinerary or generate_brochure.',
+    inputSchema: {
+      origin: z
+        .enum(['galapagos', 'antarctica'])
+        .describe('Destination origin'),
+      cruise: z.string().optional().describe('Firebase ship ID from list_ships — filters tours to a specific vessel (optional)'),
     },
     annotations: { readOnlyHint: true },
   },
   async ({ origin, cruise }) => {
     const tours = await listTours(origin, cruise);
-    const slim = tours.map(({ title, url, destination, duration }) => ({
-      title, url, destination, duration,
-    }));
-    return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
+    // Include cruise array so agent knows which ship(s) each tour runs on
+    return { content: [{ type: 'text', text: JSON.stringify(tours.map(({ title, url, destination, duration }) => ({ title, url, destination, duration })), null, 2) }] };
   }
 );
 
@@ -172,17 +216,32 @@ server.registerTool(
   'get_itinerary',
   {
     description:
-      'Get the full itinerary details for a specific tour: day-by-day program, includes, highlights, and vessel info.',
+      'Get full details for a specific tour: day-by-day program, which vessels operate it, includes/excludes, and highlights. ' +
+      'The response includes a "cruise" array showing all ships that run this itinerary — useful when user asks what ship a tour uses.',
     inputSchema: {
       origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
-      tour_id: z.string().describe('The exact "url" value returned by list_tours'),
+      tour_id: z.string().describe('The exact "url" value from list_tours (e.g. "infinity-galapagos-cruise-8-days-itinerary-b")'),
     },
     annotations: { readOnlyHint: true },
   },
   async ({ origin, tour_id }) => {
     try {
       const itinerary = await getItinerary(origin, tour_id);
-      const { images: _images, ...slim } = itinerary;
+      // Strip image URLs to save tokens, keep everything else including cruise array
+      const slim = {
+        title: itinerary.title,
+        url: itinerary.url,
+        destination: itinerary.destination,
+        itinerary: itinerary.itinerary,
+        duration: itinerary.duration,
+        shortDescription: itinerary.shortDescription,
+        description: itinerary.description,
+        highlights: itinerary.highlights,
+        includes: itinerary.includes,
+        notInclude: itinerary.notInclude,
+        cruise: itinerary.cruise.map(({ name, id, type, category }) => ({ name, id, type, category })),
+        days: itinerary.days.map(({ day, title, details, meals }) => ({ day, title, details, meals })),
+      };
       return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
     } catch (err) {
       return {

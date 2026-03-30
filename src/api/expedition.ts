@@ -19,10 +19,11 @@ async function apiFetch<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// ─── Cruises ────────────────────────────────────────────────────────────────
+// ─── Availability Cruises ────────────────────────────────────────────────────
+// These use slug-based IDs (e.g. "infinity", "seaman-journey")
 
 export interface Cruise {
-  id: string;
+  id: string;   // URL slug — use this for getCruiseAvailability()
   name: string;
   origin: string;
 }
@@ -54,6 +55,10 @@ export interface CruiseAvailability {
     name: string;
     image: string;
     type: string;
+    capacity: number;
+    category: string;
+    shortDescription: string;
+    specifications: string[];
   };
   dates: CruiseDate[];
 }
@@ -86,20 +91,29 @@ export const getHotelAvailability = (id: string, arriveDate: string, nights: str
   );
 
 // ─── Tours / Itineraries ─────────────────────────────────────────────────────
+// These use Firebase IDs for cruise filtering (different from availability slugs)
 
 export interface TourSummary {
   title: string;
-  url: string;
+  url: string;         // Pass this as tour_id to getItinerary()
   destination: string;
   shortDescription: string;
   duration: number;
 }
 
 export interface ItineraryDay {
-  day: number;
+  day: string;         // e.g. "Day 1", "Day 2"
   title: string;
-  details: string;
-  meals: string[];
+  details: string;     // May contain HTML — stripped before display
+  meals?: string[];
+}
+
+export interface ItineraryCruise {
+  name: string;
+  id: string;          // Firebase ID — use this as cruise filter in listTours()
+  type: string;
+  category: string;
+  image: string;
 }
 
 export interface Itinerary {
@@ -108,14 +122,35 @@ export interface Itinerary {
   destination: string;
   shortDescription: string;
   description: string;
+  itinerary?: string;  // Itinerary code letter (A, B, C, C1, D…)
   duration: number;
   days: ItineraryDay[];
-  cruise: { name: string; id: string }[];
+  cruise: ItineraryCruise[];  // Which ships operate this tour
   includes: string[];
   notInclude: string[];
   highlights: string[];
-  images: string[];
+  images: { title: string; image: string }[];
 }
+
+// CruiseShip returned by /itineraries/cruise — uses Firebase IDs
+export interface CruiseShip {
+  id: string;   // Firebase ID — use this as cruise filter in listTours()
+  name: string;
+}
+
+// The endpoint returns { cruises: [...] }
+interface CruiseShipsResponse {
+  cruises: CruiseShip[];
+}
+
+export const listCruiseShips = async (origin: string): Promise<CruiseShip[]> => {
+  const data = await apiFetch<CruiseShipsResponse | CruiseShip[]>(
+    `/itineraries/cruise?origin=${origin}`
+  );
+  // Handle both possible response shapes
+  if (Array.isArray(data)) return data;
+  return (data as CruiseShipsResponse).cruises ?? [];
+};
 
 export const listTours = (origin: string, cruise?: string) => {
   const cruiseParam = cruise ? `&cruise=${cruise}` : '';

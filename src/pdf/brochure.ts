@@ -1,9 +1,6 @@
 import PDFDocument from 'pdfkit';
 import type { Itinerary } from '../api/expedition';
 
-const LOGO_URL =
-  'https://dynamic-media-cdn.tripadvisor.com/media/photo-o/2c/cb/08/0b/caption.jpg?w=400&h=-1&s=1';
-
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const DARK  = '#2f3031';
 const GOLD  = '#c8a45a';
@@ -14,27 +11,23 @@ const GREEN = '#2e7d5e';
 const RED   = '#b03030';
 
 // ─── A4 layout constants ──────────────────────────────────────────────────────
-const PW = 595.28;   // page width
-const PH = 841.89;   // page height
-const M  = 50;       // left/right margin
-const CW = PW - M * 2;  // content width = 495.28
+const PW = 595.28;
+const PH = 841.89;
+const M  = 50;
+const CW = PW - M * 2;
 
-const FOOTER_H  = 58;          // footer band height
-const FOOTER_Y  = PH - FOOTER_H; // = 783.89
-const SAFE_Y    = FOOTER_Y - 8;  // content must not exceed this
+const FOOTER_H = 58;
+const FOOTER_Y = PH - FOOTER_H;
+const SAFE_Y   = FOOTER_Y - 8;
 
-// ─── HTML stripping (comprehensive) ──────────────────────────────────────────
+// ─── HTML stripping ───────────────────────────────────────────────────────────
 
 function stripHtml(raw: string | null | undefined): string {
   if (!raw) return '';
   return raw
-    // Block-level closing tags → newline
     .replace(/<\/(p|div|h[1-6]|li|tr|td|th|section|article|blockquote)>/gi, '\n')
-    // Self-closing and opening block tags → newline
     .replace(/<br\s*\/?>/gi, '\n')
-    // Remove ALL remaining tags (including inline styles, class, etc.)
     .replace(/<[^>]*>/g, '')
-    // Named HTML entities
     .replace(/&amp;/g,    '&')
     .replace(/&lt;/g,     '<')
     .replace(/&gt;/g,     '>')
@@ -48,11 +41,8 @@ function stripHtml(raw: string | null | undefined): string {
     .replace(/&hellip;/g, '\u2026')
     .replace(/&apos;/g,   "'")
     .replace(/&quot;/g,   '"')
-    // Decimal numeric entities: &#39; &#160; etc.
     .replace(/&#(\d+);/g,    (_, n) => String.fromCharCode(Number(n)))
-    // Hex numeric entities: &#x27; etc.
     .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
-    // Normalise whitespace
     .replace(/[ \t]+/g,  ' ')
     .replace(/\n[ \t]+/g, '\n')
     .replace(/[ \t]+\n/g, '\n')
@@ -60,21 +50,16 @@ function stripHtml(raw: string | null | undefined): string {
     .trim();
 }
 
-// ─── Logo fetch ───────────────────────────────────────────────────────────────
+// ─── Image fetch ──────────────────────────────────────────────────────────────
 
-async function fetchLogo(): Promise<Buffer | null> {
+async function fetchImage(url: string): Promise<Buffer | null> {
   try {
-    const res = await fetch(LOGO_URL, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'image/jpeg,image/png,image/*,*/*',
-        'Referer': 'https://www.tripadvisor.com/',
-      },
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'image/*,*/*' },
     });
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 100) return null; // guard against empty/error responses
-    return buf;
+    return buf.length > 100 ? buf : null;
   } catch {
     return null;
   }
@@ -82,12 +67,10 @@ async function fetchLogo(): Promise<Buffer | null> {
 
 // ─── Layout helpers ───────────────────────────────────────────────────────────
 
-/** Add a new page only when remaining space is insufficient */
 function needSpace(doc: PDFKit.PDFDocument, required: number) {
   if (doc.y + required > SAFE_Y) doc.addPage();
 }
 
-/** Dark bar with gold label */
 function sectionBar(doc: PDFKit.PDFDocument, title: string) {
   needSpace(doc, 40);
   const y = doc.y;
@@ -97,7 +80,6 @@ function sectionBar(doc: PDFKit.PDFDocument, title: string) {
   doc.y = y + 28;
 }
 
-/** Footer stamped on every page */
 function stampFooter(doc: PDFKit.PDFDocument) {
   doc.rect(0, FOOTER_Y, PW, FOOTER_H).fill(DARK);
   doc.rect(0, FOOTER_Y, PW, 3).fill(GOLD);
@@ -115,12 +97,16 @@ function stampFooter(doc: PDFKit.PDFDocument) {
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export async function generateBrochurePDF(itinerary: Itinerary): Promise<string> {
-  const logoBuffer = await fetchLogo();
+  // Pre-fetch vessel images
+  const vesselImages = new Map<string, Buffer | null>();
+  for (const c of itinerary.cruise ?? []) {
+    if (c.image) {
+      vesselImages.set(c.id, await fetchImage(c.image));
+    }
+  }
 
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-
-    // bufferPages: true → lets us iterate all pages at the end to stamp footer everywhere
     const doc = new PDFDocument({ margin: 0, size: 'A4', bufferPages: true });
 
     doc.on('data',  (c: Buffer) => chunks.push(c));
@@ -129,39 +115,31 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
 
     // ── HEADER ────────────────────────────────────────────────────────────────
     doc.rect(0, 0, PW, 88).fill(DARK);
-    doc.rect(0, 88, PW, 4).fill(GOLD);
+    doc.rect(0, 85, PW, 4).fill(GOLD);
 
-    // Logo on white box
-    if (logoBuffer) {
-      doc.rect(M, 12, 172, 64).fill(WHITE);
-      try {
-        doc.image(logoBuffer, M + 5, 14, { fit: [162, 60] });
-      } catch {
-        // fallback: text only
-        doc.fill(WHITE).fontSize(18).font('Helvetica-Bold').text('VOYAGERS TRAVEL', M + 6, 34);
-      }
-    } else {
-      doc.fill(WHITE).fontSize(18).font('Helvetica-Bold').text('VOYAGERS TRAVEL', M, 32);
-    }
+    // Logo: text-based, directly on dark background — no white box
+    doc.fill(WHITE).fontSize(22).font('Helvetica-Bold')
+       .text('VOYAGERS', M, 22, { characterSpacing: 3 });
+    doc.fill(GOLD).fontSize(8).font('Helvetica')
+       .text('TRAVEL', M, 47, { characterSpacing: 6 });
 
-    // Tagline on the right
+    // Tagline right-aligned
     doc.fill(GOLD).fontSize(9).font('Helvetica')
-       .text('Expedition & Adventure Tours', M + 180, 40, {
-         width: PW - M - 180 - M, align: 'right',
+       .text('Expedition & Adventure Tours', 0, 38, {
+         width: PW - M, align: 'right',
        });
 
     // ── TITLE BLOCK ───────────────────────────────────────────────────────────
-    // Dynamic height: measure title first
-    const titleFontSize = itinerary.title.length > 60 ? 16 : 19;
-    doc.rect(0, 92, PW, 88).fill(LIGHT);
+    doc.rect(0, 89, PW, 90).fill(LIGHT);
 
+    const titleFontSize = itinerary.title.length > 60 ? 15 : 18;
     doc.fill(DARK).fontSize(titleFontSize).font('Helvetica-Bold')
        .text(itinerary.title, M, 104, { width: CW, align: 'center' });
 
     doc.fill(GOLD).fontSize(11).font('Helvetica')
        .text(
          `${itinerary.duration} Days  ·  ${itinerary.destination}`,
-         M, 154, { width: CW, align: 'center' }
+         M, 150, { width: CW, align: 'center' }
        );
 
     doc.y = 190;
@@ -176,7 +154,6 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
       }
     }
 
-    // Thin gold divider
     doc.moveTo(M, doc.y).lineTo(PW - M, doc.y)
        .strokeColor(GOLD).lineWidth(0.5).stroke();
     doc.moveDown(0.6);
@@ -210,12 +187,10 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
       const colW = (CW - 12) / 2;
       const startY = doc.y;
 
-      // Green "Included" header
       doc.rect(M, startY, colW, 22).fill(GREEN);
       doc.fill(WHITE).fontSize(10).font('Helvetica-Bold')
          .text("What's Included", M + 6, startY + 6, { width: colW - 8 });
 
-      // Red "Not Included" header
       doc.rect(M + colW + 12, startY, colW, 22).fill(RED);
       doc.fill(WHITE).fontSize(10).font('Helvetica-Bold')
          .text('Not Included', M + colW + 18, startY + 6, { width: colW - 8 });
@@ -223,14 +198,12 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
       const itemsY = startY + 28;
       doc.fill(DARK).fontSize(9).font('Helvetica');
 
-      // Left column
       doc.y = itemsY;
       incItems.forEach(item => {
         doc.text(`✓  ${stripHtml(item)}`, M, doc.y, { width: colW });
       });
       const afterLeft = doc.y;
 
-      // Right column — reset Y to same start
       doc.y = itemsY;
       notItems.forEach(item => {
         doc.text(`✗  ${stripHtml(item)}`, M + colW + 12, doc.y, { width: colW });
@@ -248,7 +221,6 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
       itinerary.days.forEach(day => {
         needSpace(doc, 70);
 
-        // Day title row
         const dayY = doc.y;
         doc.rect(M, dayY, CW, 20).fill(LIGHT);
         doc.fill(DARK).fontSize(10).font('Helvetica-Bold')
@@ -275,13 +247,44 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
 
     // ── VESSELS ───────────────────────────────────────────────────────────────
     if (itinerary.cruise?.length) {
-      needSpace(doc, 60);
+      needSpace(doc, 120);
       sectionBar(doc, 'Vessels');
+
       itinerary.cruise.forEach(c => {
-        doc.fill(DARK).fontSize(10).font('Helvetica')
-           .text(`▸  ${c.name}`, M, doc.y, { width: CW });
+        needSpace(doc, 110);
+        const vesselY = doc.y;
+        const imgBuf = vesselImages.get(c.id) ?? null;
+        const imgW = 160;
+        const imgH = 100;
+
+        if (imgBuf) {
+          try {
+            doc.image(imgBuf, M, vesselY, { width: imgW, height: imgH, cover: [imgW, imgH] });
+          } catch {
+            // image failed — continue without it
+          }
+        }
+
+        const textX = imgBuf ? M + imgW + 16 : M;
+        const textW = imgBuf ? CW - imgW - 16 : CW;
+        const textY = vesselY + 10;
+
+        doc.fill(DARK).fontSize(15).font('Helvetica-Bold')
+           .text(c.name, textX, textY, { width: textW });
+
+        if (c.type) {
+          doc.fill(GOLD).fontSize(9).font('Helvetica')
+             .text(c.type.toUpperCase(), textX, doc.y + 4, { width: textW, characterSpacing: 1 });
+        }
+
+        if (c.category) {
+          doc.fill(MUTED).fontSize(9).font('Helvetica')
+             .text(c.category, textX, doc.y + 4, { width: textW });
+        }
+
+        doc.y = vesselY + imgH + 12;
+        doc.moveDown(0.5);
       });
-      doc.moveDown(0.8);
     }
 
     // ── FOOTER ON EVERY PAGE ──────────────────────────────────────────────────

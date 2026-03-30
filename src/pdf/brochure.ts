@@ -71,6 +71,29 @@ function needSpace(doc: PDFKit.PDFDocument, required: number) {
   if (doc.y + required > SAFE_Y) doc.addPage();
 }
 
+/**
+ * Write potentially long text, adding a new page when needed.
+ * Splits on newlines and estimates height per paragraph.
+ */
+function safeText(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  x: number,
+  opts: PDFKit.Mixins.TextOptions & { fontSize?: number; fontName?: string; fillColor?: string }
+) {
+  const { fontSize = 9, fontName = 'Helvetica', fillColor = DARK, ...rest } = opts;
+  doc.fontSize(fontSize).font(fontName).fill(fillColor);
+  const paragraphs = text.split('\n');
+  paragraphs.forEach((para, pi) => {
+    if (!para.trim()) { doc.moveDown(0.3); return; }
+    const charsPerLine = Math.floor((rest.width ?? CW) / (fontSize * 0.55));
+    const estimatedH   = (Math.ceil(para.length / Math.max(1, charsPerLine)) + 1) * fontSize * 1.5;
+    if (doc.y + estimatedH > SAFE_Y) doc.addPage();
+    doc.text(para, x, doc.y, { ...rest, lineBreak: true });
+    if (pi < paragraphs.length - 1) doc.moveDown(0.2);
+  });
+}
+
 function sectionBar(doc: PDFKit.PDFDocument, title: string) {
   needSpace(doc, 40);
   const y = doc.y;
@@ -148,8 +171,7 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
     if (itinerary.shortDescription) {
       const desc = stripHtml(itinerary.shortDescription);
       if (desc) {
-        doc.fill(DARK).fontSize(10).font('Helvetica-Oblique')
-           .text(desc, M, doc.y, { width: CW, align: 'justify' });
+        safeText(doc, desc, M, { width: CW, align: 'justify', fontSize: 10, fontName: 'Helvetica-Oblique', fillColor: DARK });
         doc.moveDown(0.7);
       }
     }
@@ -230,9 +252,7 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
         if (day.details) {
           const details = stripHtml(day.details);
           if (details) {
-            needSpace(doc, 20);
-            doc.fill(DARK).fontSize(9).font('Helvetica')
-               .text(details, M, doc.y, { width: CW, align: 'justify' });
+            safeText(doc, details, M, { width: CW, align: 'justify' });
           }
         }
 

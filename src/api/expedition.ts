@@ -177,6 +177,27 @@ export const listTours = (origin: string, cruise?: string) => {
 export const getItinerary = (origin: string, id: string) =>
   apiFetch<Itinerary>(`/itineraries/itinerary?origin=${origin}&id=${id}`);
 
+// ─── Cruise Info (voyagers) ───────────────────────────────────────────────────
+// Uses Firebase ID from list_ships. Always pass cruise param to avoid fetching all.
+
+export interface CruiseProduct {
+  id: string;
+  name: string;
+  capacity: number;
+  origin: string;
+  type: string;
+  category: string;
+  shortDescription: string;
+  description: string;
+  specifications: string[];
+  includes: string[];
+  notInclude: string[];
+  cabins: any[];
+}
+
+export const getCruiseInfo = (origin: string, cruiseId: string) =>
+  apiFetch<CruiseProduct[]>(`/cruises/voyagers?origin=${origin}&cruise=${cruiseId}`);
+
 // ─── Voyagers Site Search ─────────────────────────────────────────────────────
 
 export interface SearchPage {

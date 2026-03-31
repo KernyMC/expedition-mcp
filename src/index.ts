@@ -12,6 +12,7 @@ import {
   listCruiseShips,
   listTours,
   getItinerary,
+  getCruiseInfo,
   searchPages,
 } from './api/expedition';
 import { generateBrochurePDF } from './pdf/brochure';
@@ -261,6 +262,50 @@ server.registerTool(
     } catch (err) {
       return {
         content: [{ type: 'text', text: `Error fetching itinerary: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ─── Cruise Info ─────────────────────────────────────────────────────────────
+
+server.registerTool(
+  'get_cruise_info',
+  {
+    description:
+      'Get detailed information about a specific cruise vessel: description, type, category, capacity, cabin types, and specifications. ' +
+      'Use the Firebase ship ID from list_ships — always pass the cruise parameter to avoid fetching all ships. ' +
+      'Use this when the user asks about a specific ship (e.g. "tell me about the Magellan Explorer"), NOT for prices or availability.',
+    inputSchema: {
+      origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
+      cruise_id: z.string().describe('Firebase ship ID from list_ships — required, do not omit'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ origin, cruise_id }) => {
+    try {
+      const results = await getCruiseInfo(origin, cruise_id);
+      const cruise = Array.isArray(results) ? results[0] : results;
+      if (!cruise) {
+        return { content: [{ type: 'text', text: 'Cruise not found.' }], isError: true };
+      }
+      const slim = {
+        name: cruise.name,
+        type: cruise.type,
+        category: cruise.category,
+        capacity: cruise.capacity,
+        shortDescription: cruise.shortDescription,
+        description: cruise.description,
+        specifications: cruise.specifications,
+        cabins: cruise.cabins,
+        includes: cruise.includes,
+        notInclude: cruise.notInclude,
+      };
+      return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error fetching cruise info: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }

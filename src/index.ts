@@ -197,7 +197,7 @@ server.registerTool(
     description:
       'List available tours/itineraries for a destination. ' +
       'To filter by vessel: first call list_ships to get the ship\'s Firebase ID, then pass it as the cruise parameter here. ' +
-      'Each result includes a "url" field — pass that exact value as tour_id to get_itinerary or generate_brochure.',
+      'Each result includes: "url" (pass to get_itinerary or generate_brochure), "voyagersUrl" (direct link to the tour page on voyagers.travel — share this when the user asks for a link), and "cruise" (which ships operate this tour — verify this matches before generating a brochure).',
     inputSchema: {
       origin: z
         .enum(['galapagos', 'antarctica'])
@@ -208,8 +208,22 @@ server.registerTool(
   },
   async ({ origin, cruise }) => {
     const tours = await listTours(origin, cruise);
-    // Include cruise array so agent knows which ship(s) each tour runs on
-    return { content: [{ type: 'text', text: JSON.stringify(tours.map(({ title, url, destination, duration }) => ({ title, url, destination, duration })), null, 2) }] };
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify(
+          tours.map(({ title, url, destination, duration, voyagersUrl, cruise: ships }) => ({
+            title,
+            url,
+            destination,
+            duration,
+            voyagersUrl: voyagersUrl ?? null,
+            ships: (ships ?? []).map((s: any) => s.name),
+          })),
+          null, 2
+        ),
+      }],
+    };
   }
 );
 

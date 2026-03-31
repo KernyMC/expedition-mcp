@@ -114,6 +114,8 @@ export interface TourSummary {
   destination: string;
   shortDescription: string;
   duration: number;
+  voyagersUrl?: string | null;  // Direct voyagers.travel page URL
+  cruise?: { name: string; id: string }[];  // Ships that operate this tour
 }
 
 export interface ItineraryDay {
@@ -169,7 +171,7 @@ export const listCruiseShips = async (origin: string): Promise<CruiseShip[]> => 
 
 export const listTours = (origin: string, cruise?: string) => {
   const cruiseParam = cruise ? `&cruise=${cruise}` : '';
-  return apiFetch<TourSummary[]>(`/itineraries/?origin=${origin}${cruiseParam}`);
+  return apiFetch<TourSummary[]>(`/itineraries/voyagers-url?origin=${origin}${cruiseParam}`);
 };
 
 export const getItinerary = (origin: string, id: string) =>

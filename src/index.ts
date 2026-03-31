@@ -12,6 +12,7 @@ import {
   listCruiseShips,
   listTours,
   getItinerary,
+  searchPages,
 } from './api/expedition';
 import { generateBrochurePDF } from './pdf/brochure';
 
@@ -289,6 +290,39 @@ server.registerTool(
     } catch (err) {
       return {
         content: [{ type: 'text', text: `Error generating brochure: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ─── Site Search ─────────────────────────────────────────────────────────────
+
+server.registerTool(
+  'search_page',
+  {
+    description:
+      'Search voyagers.travel pages by keyword and return matching page titles and URLs. ' +
+      'Use this when the user asks for a link to a page, wants to know if a topic is covered on the site, ' +
+      'or needs a URL to share (e.g. "what is the URL for the Infinity cruise page?"). ' +
+      'Returns results grouped by category with title, URL, and short summary.',
+    inputSchema: {
+      query: z.string().describe('Search keywords — e.g. "Infinity cruise", "Galapagos deals", "Antarctica expedition"'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ query }) => {
+    try {
+      const categories = await searchPages(query);
+      // Return slim result: category, title, url only
+      const slim = categories.map(cat => ({
+        category: cat.category,
+        pages: cat.pages.map(({ title, url }) => ({ title, url })),
+      }));
+      return { content: [{ type: 'text', text: JSON.stringify(slim, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error searching pages: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }

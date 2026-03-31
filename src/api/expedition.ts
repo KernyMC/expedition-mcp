@@ -3,6 +3,21 @@ const TOKEN = process.env.EXPEDITION_API_TOKEN!;
 // ExpeditionAPI validates the Origin header against authorized domains
 const ORIGIN = process.env.SERVER_DOMAIN ?? 'https://mcp.voyagers.travel';
 
+// Voyagers site API (for search)
+const VOYAGERS_API_URL = process.env.VOYAGERS_API_URL!;
+const VOYAGERS_TOKEN   = process.env.VOYAGERS_API_TOKEN!;
+
+async function voyagersFetch<T>(path: string): Promise<T> {
+  const res = await fetch(`${VOYAGERS_API_URL}${path}`, {
+    headers: {
+      Authorization: `Bearer ${VOYAGERS_TOKEN}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) throw new Error(`VoyagersAPI error ${res.status}: ${path}`);
+  return res.json() as Promise<T>;
+}
+
 async function apiFetch<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: {
@@ -159,3 +174,20 @@ export const listTours = (origin: string, cruise?: string) => {
 
 export const getItinerary = (origin: string, id: string) =>
   apiFetch<Itinerary>(`/itineraries/itinerary?origin=${origin}&id=${id}`);
+
+// ─── Voyagers Site Search ─────────────────────────────────────────────────────
+
+export interface SearchPage {
+  title: string;
+  url: string;
+  image: string;
+  summary: string;
+}
+
+export interface SearchCategory {
+  category: string;
+  pages: SearchPage[];
+}
+
+export const searchPages = (q: string): Promise<SearchCategory[]> =>
+  voyagersFetch<SearchCategory[]>(`/database/search-pages?q=${encodeURIComponent(q)}`);

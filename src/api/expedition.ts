@@ -216,3 +216,76 @@ export interface SearchCategory {
 
 export const searchPages = (q: string): Promise<SearchCategory[]> =>
   voyagersFetch<SearchCategory[]>(`/database/search-pages?q=${encodeURIComponent(q)}`);
+
+// ─── Voyagers GraphQL ─────────────────────────────────────────────────────────
+
+async function graphqlFetch<T>(query: string): Promise<T> {
+  const res = await fetch(`${VOYAGERS_API_URL}/graphql`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${VOYAGERS_TOKEN}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error(`GraphQL error ${res.status}`);
+  const json = await res.json() as { data: T; errors?: { message: string }[] };
+  if (json.errors?.length) throw new Error(`GraphQL: ${json.errors[0]!.message}`);
+  return json.data;
+}
+
+const DEALS_ORIGIN_MAP: Record<string, 'galapagos' | 'antartida' | 'ecuador'> = {
+  galapagos:  'galapagos',
+  antarctica: 'antartida',
+  antartida:  'antartida',
+  ecuador:    'ecuador',
+};
+
+export interface Deal {
+  ship: string;
+  category: string;
+  origin: string;
+  startDate: string;
+  endDate: string;
+  normalPrice: number;
+  offerPrice: number;
+  savingsPercent: number;
+  details: string;
+  link: string;
+}
+
+export const getDeals = async (origin: string): Promise<Deal[]> => {
+  const mapped = DEALS_ORIGIN_MAP[origin.toLowerCase()] ?? 'galapagos';
+  const data = await graphqlFetch<{
+    getDeals: {
+      cruise: { name: string; category: string; origin: string; url: string; type: string };
+      startDate: string;
+      endDate: string;
+      normalPrice: number;
+      offerPrice: number;
+      category: string;
+      details: string[];
+    }[];
+  }>(`{
+    getDeals(category:"deal" origin:"${mapped}") {
+      cruise { name category origin url type }
+      startDate endDate normalPrice offerPrice category details
+    }
+  }`);
+  const today = new Date().toISOString().slice(0, 10);
+  return (data.getDeals ?? [])
+    .filter(d => d.startDate > today && d.offerPrice < d.normalPrice)
+    .sort((a, b) => a.offerPrice - b.offerPrice)
+    .map(d => ({
+      ship:           d.cruise.name,
+      category:       d.cruise.category,
+      origin:         d.cruise.origin,
+      startDate:      d.startDate,
+      endDate:        d.endDate,
+      normalPrice:    d.normalPrice,
+      offerPrice:     d.offerPrice,
+      savingsPercent: Math.round((1 - d.offerPrice / d.normalPrice) * 100),
+      details:        (d.details ?? [])[0] ?? '',
+      link:           `https://www.voyagers.travel/${d.cruise.origin === 'antartida' ? 'antarctica' : d.cruise.origin}/cruises/${d.cruise.url}`,
+    }));
+};

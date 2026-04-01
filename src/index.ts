@@ -14,6 +14,7 @@ import {
   getItinerary,
   getCruiseInfo,
   searchPages,
+  getDeals,
 } from './api/expedition';
 import { generateBrochurePDF, generateCruiseBrochurePDF } from './pdf/brochure';
 
@@ -491,6 +492,39 @@ server.registerTool(
     } catch (err) {
       return {
         content: [{ type: 'text', text: `Error searching pages: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ─── Deals ───────────────────────────────────────────────────────────────────
+
+server.registerTool(
+  'get_deals',
+  {
+    description:
+      'Get current cruise deals, promotions, and discounts from Voyagers Travel. ' +
+      'Use this when the user asks about: deals, promotions, discounts, offers, last-minute prices, ' +
+      '"best price", "any promotions?", "special offers", "¿hay ofertas?", "¿descuentos disponibles?", "¿hay promociones?". ' +
+      'Returns only real active discounts sorted by price, with savings percentage and direct link.',
+    inputSchema: {
+      origin: z
+        .enum(['galapagos', 'antarctica', 'ecuador'])
+        .describe('Destination to fetch deals for'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ origin }) => {
+    try {
+      const deals = await getDeals(origin);
+      if (!deals.length) {
+        return { content: [{ type: 'text', text: `No active deals found for ${origin} at this time.` }] };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(deals, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error fetching deals: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }

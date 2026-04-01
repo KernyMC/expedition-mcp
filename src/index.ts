@@ -131,12 +131,77 @@ server.registerTool(
   }
 );
 
+server.registerTool(
+  'get_availability_summary',
+  {
+    description:
+      'Get a consolidated availability summary across ALL cruise vessels for a given month and destination. ' +
+      'Use this when the user asks what is available in a specific month or period (e.g. "what cruises are available in July?", "¿qué hay disponible en agosto?"). ' +
+      'Returns ships that have departures in that month with dates, spaces, and price range. ' +
+      'Much more efficient than calling get_cruise_availability for each ship individually.',
+    inputSchema: {
+      origin: z
+        .enum(['galapagos', 'antarctica', 'all'])
+        .default('all')
+        .describe('Destination origin'),
+      month: z
+        .string()
+        .describe('Month to check in YYYY-MM format (e.g. "2026-07" for July 2026)'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ origin, month }) => {
+    try {
+      const cruises = await listCruises(origin) as any[];
+      const startDate = `${month}-01`;
+
+      // Fetch all in parallel
+      const results = await Promise.allSettled(
+        cruises.map(async (cruise) => {
+          const avail = await getCruiseAvailability(cruise.id, startDate) as any;
+          const datesInMonth = (avail.dates ?? []).filter((d: any) =>
+            d.startDate?.startsWith(month)
+          );
+          if (!datesInMonth.length) return null;
+          return {
+            ship: avail.product?.name ?? cruise.name,
+            origin: cruise.origin,
+            dates: datesInMonth.map((d: any) => ({
+              startDate: d.startDate,
+              endDate: d.endDate,
+              days: d.days,
+              spaces: d.spaces,
+              price: d.promotionalRate ?? d.rackRate,
+              promotion: d.promotionDetails ?? null,
+            })),
+          };
+        })
+      );
+
+      const available = results
+        .filter((r) => r.status === 'fulfilled' && r.value !== null)
+        .map((r) => (r as PromiseFulfilledResult<any>).value);
+
+      if (!available.length) {
+        return { content: [{ type: 'text', text: `No departures found for ${month}.` }] };
+      }
+
+      return { content: [{ type: 'text', text: JSON.stringify(available, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error fetching availability summary: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
 // ─── Hotels ─────────────────────────────────────────────────────────────────
 
 server.registerTool(
   'list_hotels',
   {
-    description: 'List available hotels.',
+    description: 'List available hotels with their IDs. Call this first before get_hotel_availability. Use when user asks about hotel options or land packages.',
     inputSchema: {},
     annotations: { readOnlyHint: true },
   },
@@ -149,7 +214,7 @@ server.registerTool(
 server.registerTool(
   'get_hotel_availability',
   {
-    description: 'Get availability for a specific hotel by arrival date and number of nights.',
+    description: 'Get room availability and pricing for a specific hotel. Always call list_hotels first to get the hotel_id. Use when user asks about hotel prices, availability, or rooms.',
     inputSchema: {
       hotel_id: z.string().describe('Hotel ID from list_hotels'),
       arrive_date: z.string().describe('Arrival date in YYYY-MM-DD format'),
@@ -174,7 +239,7 @@ server.registerTool(
       'Call this when the user asks about tours for a specific ship (e.g. "tours on the Infinity").',
     inputSchema: {
       origin: z
-        .enum(['galapagos', 'antarctica'])
+        .enum(['galapagos', 'antarctica', 'costa-rica'])
         .describe('Destination origin'),
     },
     annotations: { readOnlyHint: true },
@@ -201,7 +266,7 @@ server.registerTool(
       'Each result includes: "url" (pass to get_itinerary or generate_brochure), "voyagersUrl" (direct link to the tour page on voyagers.travel — share this when the user asks for a link), and "cruise" (which ships operate this tour — verify this matches before generating a brochure).',
     inputSchema: {
       origin: z
-        .enum(['galapagos', 'antarctica'])
+        .enum(['galapagos', 'antarctica', 'costa-rica'])
         .describe('Destination origin'),
       cruise: z.string().optional().describe('Firebase ship ID from list_ships — filters tours to a specific vessel (optional)'),
     },
@@ -235,7 +300,7 @@ server.registerTool(
       'Get full details for a specific tour: day-by-day program, which vessels operate it, includes/excludes, and highlights. ' +
       'The response includes a "cruise" array showing all ships that run this itinerary — useful when user asks what ship a tour uses.',
     inputSchema: {
-      origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
+      origin: z.enum(['galapagos', 'antarctica', 'costa-rica']).describe('Destination origin'),
       tour_id: z.string().describe('The exact "url" value from list_tours (e.g. "infinity-galapagos-cruise-8-days-itinerary-b")'),
     },
     annotations: { readOnlyHint: true },
@@ -278,7 +343,7 @@ server.registerTool(
       'Use the Firebase ship ID from list_ships — always pass the cruise parameter to avoid fetching all ships. ' +
       'Use this when the user asks about a specific ship (e.g. "tell me about the Magellan Explorer"), NOT for prices or availability.',
     inputSchema: {
-      origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
+      origin: z.enum(['galapagos', 'antarctica', 'costa-rica']).describe('Destination origin'),
       cruise_id: z.string().describe('Firebase ship ID from list_ships — required, do not omit'),
     },
     annotations: { readOnlyHint: true },
@@ -320,7 +385,7 @@ server.registerTool(
       'Use this when the user asks for a brochure or PDF of a ship itself — NOT a specific tour itinerary. ' +
       'You must call list_ships first to get the Firebase ship ID.',
     inputSchema: {
-      origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
+      origin: z.enum(['galapagos', 'antarctica', 'costa-rica']).describe('Destination origin'),
       cruise_id: z.string().describe('Firebase ship ID from list_ships — required'),
     },
   },
@@ -366,7 +431,7 @@ server.registerTool(
     description:
       'Generate a PDF brochure for a tour and return a download URL. Use this only when the user explicitly requests a brochure or PDF download. You must call list_tours first to get the exact "url" value to pass as tour_id.',
     inputSchema: {
-      origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
+      origin: z.enum(['galapagos', 'antarctica', 'costa-rica']).describe('Destination origin'),
       tour_id: z.string().describe('The exact "url" value returned by list_tours — not the title'),
     },
   },

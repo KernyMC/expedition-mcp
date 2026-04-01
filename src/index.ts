@@ -15,7 +15,7 @@ import {
   getCruiseInfo,
   searchPages,
 } from './api/expedition';
-import { generateBrochurePDF } from './pdf/brochure';
+import { generateBrochurePDF, generateCruiseBrochurePDF } from './pdf/brochure';
 
 const server = new McpServer(
   { name: 'expedition-api', version: '0.1.0' },
@@ -306,6 +306,50 @@ server.registerTool(
     } catch (err) {
       return {
         content: [{ type: 'text', text: `Error fetching cruise info: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+server.registerTool(
+  'generate_cruise_brochure',
+  {
+    description:
+      'Generate a PDF brochure for a cruise vessel (ship profile: description, cabins, specs, includes). ' +
+      'Use this when the user asks for a brochure or PDF of a ship itself — NOT a specific tour itinerary. ' +
+      'You must call list_ships first to get the Firebase ship ID.',
+    inputSchema: {
+      origin: z.enum(['galapagos', 'antarctica']).describe('Destination origin'),
+      cruise_id: z.string().describe('Firebase ship ID from list_ships — required'),
+    },
+  },
+  async ({ origin, cruise_id }) => {
+    try {
+      const results = await getCruiseInfo(origin, cruise_id);
+      const cruise = Array.isArray(results) ? results[0] : results;
+      if (!cruise) {
+        return { content: [{ type: 'text', text: 'Cruise not found.' }], isError: true };
+      }
+      const base64 = await generateCruiseBrochurePDF(cruise);
+      const buffer = Buffer.from(base64, 'base64');
+      const filename = `${cruise.name.toLowerCase().replace(/\s+/g, '-')}-brochure.pdf`;
+      const id = randomUUID();
+
+      pdfStore.set(id, {
+        buffer,
+        filename,
+        title: cruise.name,
+        expiresAt: Date.now() + 30 * 60 * 1000,
+      });
+
+      const downloadUrl = `${PUBLIC_URL}/pdf/${id}`;
+      return {
+        content: [{ type: 'text', text: `Brochure ready. Download URL: ${downloadUrl}` }],
+      };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error generating cruise brochure: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }

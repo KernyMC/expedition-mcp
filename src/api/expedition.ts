@@ -193,6 +193,8 @@ export interface CruiseProduct {
   includes: string[];
   notInclude: string[];
   cabins: any[];
+  mainImage?: { url: string }[];
+  card?: { url: string }[];
 }
 
 export const getCruiseInfo = (origin: string, cruiseId: string) =>

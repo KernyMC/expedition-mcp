@@ -234,6 +234,139 @@ async function graphqlFetch<T>(query: string): Promise<T> {
   return json.data;
 }
 
+// ─── Voyagers Tours (GraphQL) ─────────────────────────────────────────────────
+
+export interface VoyagersTour {
+  title: string;
+  url: string;      // Pass this to get_voyagers_tour_detail for full info
+  duration: number;
+  type: string;
+  price: number;
+  offer?: number;
+  destination: string;
+  link: string;
+}
+
+export interface VoyagersTourDetail {
+  title: string;
+  destination: string;
+  duration: number;
+  price: number;
+  shortDescription: string;
+  highlights: string[];
+  includes: string[];
+  notInclude: string[];
+  days: { day: string; title: string; details: string; meals?: string[] }[];
+  fitnessRequirements?: string;
+  accommodation?: string;
+  recommendedAge?: string;
+  travelTips?: string;
+  link: string;
+}
+
+const TOURS_DESTINATION_URL_MAP: Record<string, string> = {
+  antartida: 'antarctica',
+  'costa-rica': 'costa-rica',
+};
+
+export const getVoyagersTours = async (destination: string): Promise<VoyagersTour[]> => {
+  const dest = destination.toLowerCase();
+  const data = await graphqlFetch<{
+    getTours: {
+      title: string;
+      url: string;
+      duration: number;
+      type: string;
+      price: number;
+      offer?: number;
+      destination: string;
+    }[];
+  }>(`{
+    getTours(domain:"voyagers.travel" destination:"${dest}") {
+      title url duration type price offer destination
+    }
+  }`);
+  const urlDest = TOURS_DESTINATION_URL_MAP[dest] ?? dest;
+  return (data.getTours ?? []).map(t => ({
+    title:       t.title,
+    url:         t.url,
+    duration:    t.duration,
+    type:        t.type,
+    price:       t.offer ?? t.price,
+    offer:       t.offer,
+    destination: t.destination,
+    link:        `https://www.voyagers.travel/${urlDest}/tours/${t.url}`,
+  }));
+};
+
+export const getVoyagersTourDetail = async (destination: string, url: string): Promise<VoyagersTourDetail | null> => {
+  const dest = destination.toLowerCase();
+  const urlDest = TOURS_DESTINATION_URL_MAP[dest] ?? dest;
+
+  function strip(raw: string | null | undefined): string {
+    if (!raw) return '';
+    return raw
+      .replace(/<\/(p|div|h[1-6]|li|br|tr|td)>/gi, ' ')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]*>/g, '')
+      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&nbsp;/g, ' ').replace(/&rsquo;/g, "'").replace(/&ldquo;|&rdquo;/g, '"')
+      .replace(/&mdash;/g, '—').replace(/&ndash;/g, '–')
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+      .replace(/\s{2,}/g, ' ').trim();
+  }
+
+  const data = await graphqlFetch<{
+    getTour: {
+      title: string;
+      url: string;
+      destination: string;
+      duration: number;
+      price: number;
+      offer?: number;
+      shortDescription: string;
+      highlights: { highlights: string }[];
+      includes: { item: string }[];
+      notInclude: { item: string }[];
+      days: { day: string; title: string; details: string; meals?: string[] }[];
+      fitnessRequirements?: string;
+      accommodation?: string;
+      recommendedAge?: string;
+      travelTips?: string;
+    } | null;
+  }>(`{
+    getTour(domain:"voyagers.travel" destination:"${dest}" url:"${url}") {
+      title url destination duration price offer
+      shortDescription
+      highlights { highlights }
+      includes { item }
+      notInclude { item }
+      days { day title details meals }
+      fitnessRequirements accommodation recommendedAge travelTips
+    }
+  }`);
+
+  const t = data.getTour;
+  if (!t) return null;
+
+  return {
+    title:               t.title,
+    destination:         t.destination,
+    duration:            t.duration,
+    price:               t.offer ?? t.price,
+    shortDescription:    strip(t.shortDescription),
+    highlights:          (t.highlights ?? []).map(h => strip(h.highlights)).filter(Boolean),
+    includes:            (t.includes ?? []).map(i => strip(i.item)).filter(Boolean),
+    notInclude:          (t.notInclude ?? []).map(i => strip(i.item)).filter(Boolean),
+    days:                (t.days ?? []).map(d => ({ day: d.day, title: d.title, details: strip(d.details), meals: d.meals })),
+    fitnessRequirements: strip(t.fitnessRequirements),
+    accommodation:       strip(t.accommodation),
+    recommendedAge:      strip(t.recommendedAge),
+    travelTips:          strip(t.travelTips),
+    link:                `https://www.voyagers.travel/${urlDest}/tours/${t.url}`,
+  };
+};
+
 const DEALS_ORIGIN_MAP: Record<string, 'galapagos' | 'antartida' | 'ecuador'> = {
   galapagos:  'galapagos',
   antarctica: 'antartida',

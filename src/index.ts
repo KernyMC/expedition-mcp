@@ -15,6 +15,8 @@ import {
   getCruiseInfo,
   searchPages,
   getDeals,
+  getVoyagersTours,
+  getVoyagersTourDetail,
 } from './api/expedition';
 import { generateBrochurePDF, generateCruiseBrochurePDF } from './pdf/brochure';
 
@@ -525,6 +527,80 @@ server.registerTool(
     } catch (err) {
       return {
         content: [{ type: 'text', text: `Error fetching deals: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+// ─── Voyagers Tours (non-Expedition destinations) ────────────────────────────
+
+server.registerTool(
+  'get_voyagers_tours',
+  {
+    description:
+      'Get tours and itineraries from Voyagers Travel for any destination. ' +
+      'Use this for destinations NOT covered by list_tours (which only covers galapagos, antarctica, costa-rica): ' +
+      'colombia, peru, patagonia, bolivia, ecuador (land tours), chile, nordic, arctic, africa, argentina. ' +
+      'Also use for general tour listings of any destination when the user asks "what tours do you have in X?". ' +
+      'Returns tour titles, duration, type, price, and direct voyagers.travel link.',
+    inputSchema: {
+      destination: z
+        .enum([
+          'galapagos', 'ecuador', 'colombia', 'peru', 'patagonia',
+          'bolivia', 'argentina', 'chile', 'costa-rica',
+          'antartida', 'arctic', 'polar', 'nordic', 'africa',
+        ])
+        .describe('Destination — use "antartida" for Antarctica'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ destination }) => {
+    try {
+      const tours = await getVoyagersTours(destination);
+      if (!tours.length) {
+        return { content: [{ type: 'text', text: `No tours found for ${destination}.` }] };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(tours, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error fetching tours: ${err instanceof Error ? err.message : String(err)}` }],
+        isError: true,
+      };
+    }
+  }
+);
+
+server.registerTool(
+  'get_voyagers_tour_detail',
+  {
+    description:
+      'Get full details of a specific Voyagers Travel tour: description, day-by-day itinerary, ' +
+      'what is included/not included, highlights, fitness requirements, accommodation, and tips. ' +
+      'Use the "url" field from get_voyagers_tours results — NOT the full link, just the url slug. ' +
+      'Call get_voyagers_tours first to get the list, then call this for a specific tour the user wants to know more about.',
+    inputSchema: {
+      destination: z
+        .enum([
+          'galapagos', 'ecuador', 'colombia', 'peru', 'patagonia',
+          'bolivia', 'argentina', 'chile', 'costa-rica',
+          'antartida', 'arctic', 'polar', 'nordic', 'africa',
+        ])
+        .describe('Destination of the tour'),
+      url: z.string().describe('Tour URL slug from get_voyagers_tours results (e.g. "fitz-roy-trek")'),
+    },
+    annotations: { readOnlyHint: true },
+  },
+  async ({ destination, url }) => {
+    try {
+      const detail = await getVoyagersTourDetail(destination, url);
+      if (!detail) {
+        return { content: [{ type: 'text', text: `Tour not found: ${url}` }], isError: true };
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(detail, null, 2) }] };
+    } catch (err) {
+      return {
+        content: [{ type: 'text', text: `Error fetching tour detail: ${err instanceof Error ? err.message : String(err)}` }],
         isError: true,
       };
     }

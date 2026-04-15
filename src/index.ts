@@ -36,6 +36,8 @@ const server = new McpServer(
       '- User asks what ship a tour runs on → get_itinerary() — the "cruise" array in the response lists all vessels\n' +
       '- User asks about prices, dates, availability → list_cruises(origin) to get slug → get_cruise_availability(slug)\n' +
       '- User asks for a PDF/brochure → list_tours first to get the url, then generate_brochure(origin, url)\n' +
+      '- User asks which cruises visit a specific island (e.g. Bartolome) → list_tours(origin), then call get_itinerary for up to 3 tours maximum. Do NOT check every tour — summarize findings and offer to check more if needed.\n' +
+      '- User asks about deals, promotions, discounts, offers → get_deals(origin). Do NOT use RAG or list_cruises for this.\n' +
       '- NEVER guess IDs — always call the appropriate list tool first.',
   }
 );

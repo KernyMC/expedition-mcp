@@ -115,7 +115,7 @@ export interface TourSummary {
   shortDescription: string;
   duration: number;
   voyagersUrl?: string | null;  // Direct voyagers.travel page URL
-  cruise?: { name: string; id: string }[];  // Ships that operate this tour
+  cruise?: { name: string; id: string; url?: string }[];  // Ships that operate this tour
 }
 
 export interface ItineraryDay {

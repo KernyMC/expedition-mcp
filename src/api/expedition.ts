@@ -264,10 +264,30 @@ export interface VoyagersTourDetail {
   link: string;
 }
 
-const TOURS_DESTINATION_URL_MAP: Record<string, string> = {
-  antartida: 'antarctica',
-  'costa-rica': 'costa-rica',
+// Maps DB destination key → { urlSegment, tourPath }
+// urlSegment: the destination part of the URL
+// tourPath: the path segment before the tour slug (null = no extra segment)
+const DEST_URL_CONFIG: Record<string, { seg: string; path: string | null }> = {
+  antartida:    { seg: 'antarctica', path: 'itineraries' },
+  ecuador:      { seg: 'ecuador',    path: 'tours' },
+  galapagos:    { seg: 'galapagos',  path: 'tours' },
+  'costa-rica': { seg: 'costa-rica', path: 'tours' },
+  peru:         { seg: 'peru',       path: 'tours' },
+  colombia:     { seg: 'colombia',   path: 'tours' },
+  bolivia:      { seg: 'bolivia',    path: 'tours' },
+  nordic:       { seg: 'nordic',     path: 'tours' },
+  patagonia:    { seg: 'patagonia',  path: 'tours' },
+  chile:        { seg: 'chile',      path: 'tours' },
+  argentina:    { seg: 'argentina',  path: 'tours' },
+  africa:       { seg: 'africa',     path: 'tours' },
+  arctic:       { seg: 'arctic',     path: 'tours' },
 };
+
+function buildTourLink(dest: string, url: string): string {
+  const cfg = DEST_URL_CONFIG[dest] ?? { seg: dest, path: 'tours' };
+  const base = `https://www.voyagers.travel/${cfg.seg}`;
+  return cfg.path ? `${base}/${cfg.path}/${url}` : `${base}/${url}`;
+}
 
 export const getVoyagersTours = async (destination: string): Promise<VoyagersTour[]> => {
   const dest = destination.toLowerCase();
@@ -286,7 +306,6 @@ export const getVoyagersTours = async (destination: string): Promise<VoyagersTou
       title url duration type price offer destination
     }
   }`);
-  const urlDest = TOURS_DESTINATION_URL_MAP[dest] ?? dest;
   return (data.getTours ?? []).map(t => ({
     title:       t.title,
     url:         t.url,
@@ -295,13 +314,12 @@ export const getVoyagersTours = async (destination: string): Promise<VoyagersTou
     price:       t.offer ?? t.price,
     offer:       t.offer,
     destination: t.destination,
-    link:        `https://www.voyagers.travel/${urlDest}/tours/${t.url}`,
+    link:        buildTourLink(dest, t.url),
   }));
 };
 
 export const getVoyagersTourDetail = async (destination: string, url: string): Promise<VoyagersTourDetail | null> => {
   const dest = destination.toLowerCase();
-  const urlDest = TOURS_DESTINATION_URL_MAP[dest] ?? dest;
 
   function strip(raw: string | null | undefined): string {
     if (!raw) return '';
@@ -363,7 +381,7 @@ export const getVoyagersTourDetail = async (destination: string, url: string): P
     accommodation:       strip(t.accommodation),
     recommendedAge:      strip(t.recommendedAge),
     travelTips:          strip(t.travelTips),
-    link:                `https://www.voyagers.travel/${urlDest}/tours/${t.url}`,
+    link:                buildTourLink(dest, t.url),
   };
 };
 

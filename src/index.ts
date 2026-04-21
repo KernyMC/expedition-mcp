@@ -38,7 +38,8 @@ const server = new McpServer(
       '- User asks for a PDF/brochure → list_tours first to get the url, then generate_brochure(origin, url)\n' +
       '- User asks which cruises visit a specific island (e.g. Bartolome) → list_tours(origin), then call get_itinerary for up to 3 tours maximum. Do NOT check every tour — summarize findings and offer to check more if needed.\n' +
       '- User asks about deals, promotions, discounts, offers → get_deals(origin). Do NOT use RAG or list_cruises for this.\n' +
-      '- NEVER guess IDs — always call the appropriate list tool first.',
+      '- NEVER guess IDs — always call the appropriate list tool first.\n' +
+      '- When sharing tour links, use ONLY the exact "voyagersUrl" from list_tours. If voyagersUrl is null for a tour, do NOT construct or guess a URL — simply omit the link for that tour.',
   }
 );
 
@@ -283,14 +284,21 @@ server.registerTool(
       content: [{
         type: 'text',
         text: JSON.stringify(
-          tours.map(({ title, url, destination, duration, voyagersUrl, cruise: ships }) => ({
-            title,
-            url,
-            destination,
-            duration,
-            voyagersUrl: voyagersUrl ?? null,
-            ships: (ships ?? []).map((s: any) => s.name),
-          })),
+          tours.map(({ title, url, destination, duration, voyagersUrl, cruise: ships }) => {
+            const cruiseUrl = (ships as any)?.[0]?.url as string | undefined;
+            const resolvedUrl = voyagersUrl ?? (() => {
+              if (origin === 'antarctica') return `https://www.voyagers.travel/antarctica/itineraries/${url}`;
+              return cruiseUrl ? `https://www.voyagers.travel/${origin}/cruises/${cruiseUrl}/${url}` : null;
+            })();
+            return {
+              title,
+              url,
+              destination,
+              duration,
+              voyagersUrl: resolvedUrl,
+              ships: (ships ?? []).map((s: any) => s.name),
+            };
+          }),
           null, 2
         ),
       }],

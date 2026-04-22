@@ -39,7 +39,8 @@ const server = new McpServer(
       '- User asks which cruises visit a specific island (e.g. Bartolome) → list_tours(origin), then call get_itinerary for up to 3 tours maximum. Do NOT check every tour — summarize findings and offer to check more if needed.\n' +
       '- User asks about deals, promotions, discounts, offers → get_deals(origin). Do NOT use RAG or list_cruises for this.\n' +
       '- NEVER guess IDs — always call the appropriate list tool first.\n' +
-      '- When sharing tour links, use ONLY the exact "voyagersUrl" from list_tours. If voyagersUrl is null for a tour, do NOT construct or guess a URL — simply omit the link for that tour.',
+      '- When sharing tour links, use ONLY the exact "voyagersUrl" from list_tours. If voyagersUrl is null for a tour, do NOT construct or guess a URL — simply omit the link for that tour.\n' +
+      '- When asking the user to choose between options (destination, trip type, cruise, duration, etc.), append [OPTIONS: Option A | Option B | Option C] at the end of your message. The UI renders these as clickable buttons. Use 2–5 options max. Examples: [OPTIONS: Galápagos | Antarctica | Costa Rica] or [OPTIONS: 5 days | 8 days | 10+ days].',
   }
 );
 

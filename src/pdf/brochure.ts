@@ -1,5 +1,19 @@
 import PDFDocument from 'pdfkit';
+import sharp from 'sharp';
 import type { Itinerary, CruiseProduct } from '../api/expedition';
+
+const VOYAGERS_LOGO_URL = 'https://firebasestorage.googleapis.com/v0/b/travel-web-app-1.appspot.com/o/flamelink%2Fmedia%2Fvoyagers-travel-logo-white.svg?alt=media&token=b2f1086d-4978-4190-9350-3dd8ad41eaa1';
+
+async function fetchSvgAsPng(url: string): Promise<Buffer | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const svg = Buffer.from(await res.arrayBuffer());
+    return await sharp(svg).png().toBuffer();
+  } catch {
+    return null;
+  }
+}
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
 const DARK  = '#2f3031';
@@ -125,9 +139,10 @@ function stampFooter(doc: PDFKit.PDFDocument) {
 // ─── Cruise / Ship brochure ───────────────────────────────────────────────────
 
 export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<string> {
-  // Pre-fetch main image
-  const imageUrl = cruise.mainImage?.[0]?.url ?? cruise.card?.[0]?.url ?? null;
-  const imageBuf = imageUrl ? await fetchImage(imageUrl) : null;
+  const [imageBuf, logoBuf] = await Promise.all([
+    (cruise.mainImage?.[0]?.url ?? cruise.card?.[0]?.url) ? fetchImage(cruise.mainImage?.[0]?.url ?? cruise.card?.[0]?.url!) : Promise.resolve(null),
+    fetchSvgAsPng(VOYAGERS_LOGO_URL),
+  ]);
 
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -141,10 +156,14 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
     doc.rect(0, 0, PW, 88).fill(DARK);
     doc.rect(0, 85, PW, 4).fill(GOLD);
 
-    doc.fill(WHITE).fontSize(22).font('Helvetica-Bold')
-       .text('VOYAGERS', M, 22, { characterSpacing: 3 });
-    doc.fill(GOLD).fontSize(8).font('Helvetica')
-       .text('TRAVEL', M, 47, { characterSpacing: 6 });
+    if (logoBuf) {
+      doc.image(logoBuf, M, 16, { height: 52, fit: [180, 52] });
+    } else {
+      doc.fill(WHITE).fontSize(22).font('Helvetica-Bold')
+         .text('VOYAGERS', M, 22, { characterSpacing: 3 });
+      doc.fill(GOLD).fontSize(8).font('Helvetica')
+         .text('TRAVEL', M, 47, { characterSpacing: 6 });
+    }
     doc.fill(GOLD).fontSize(9).font('Helvetica')
        .text('Expedition & Adventure Tours', 0, 38, { width: PW - M, align: 'right' });
 
@@ -298,13 +317,15 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
 // ─── Tour itinerary brochure ──────────────────────────────────────────────────
 
 export async function generateBrochurePDF(itinerary: Itinerary): Promise<string> {
-  // Pre-fetch vessel images
+  // Pre-fetch vessel images + logo
+  const [logoBuf, ...vesselImagesList] = await Promise.all([
+    fetchSvgAsPng(VOYAGERS_LOGO_URL),
+    ...(itinerary.cruise ?? []).filter(c => c.image).map(c => fetchImage(c.image)),
+  ]);
   const vesselImages = new Map<string, Buffer | null>();
-  for (const c of itinerary.cruise ?? []) {
-    if (c.image) {
-      vesselImages.set(c.id, await fetchImage(c.image));
-    }
-  }
+  (itinerary.cruise ?? []).filter(c => c.image).forEach((c, i) => {
+    vesselImages.set(c.id, vesselImagesList[i] ?? null);
+  });
 
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -318,11 +339,15 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
     doc.rect(0, 0, PW, 88).fill(DARK);
     doc.rect(0, 85, PW, 4).fill(GOLD);
 
-    // Logo: text-based, directly on dark background — no white box
-    doc.fill(WHITE).fontSize(22).font('Helvetica-Bold')
-       .text('VOYAGERS', M, 22, { characterSpacing: 3 });
-    doc.fill(GOLD).fontSize(8).font('Helvetica')
-       .text('TRAVEL', M, 47, { characterSpacing: 6 });
+    // Logo
+    if (logoBuf) {
+      doc.image(logoBuf, M, 16, { height: 52, fit: [180, 52] });
+    } else {
+      doc.fill(WHITE).fontSize(22).font('Helvetica-Bold')
+         .text('VOYAGERS', M, 22, { characterSpacing: 3 });
+      doc.fill(GOLD).fontSize(8).font('Helvetica')
+         .text('TRAVEL', M, 47, { characterSpacing: 6 });
+    }
 
     // Tagline right-aligned
     doc.fill(GOLD).fontSize(9).font('Helvetica')

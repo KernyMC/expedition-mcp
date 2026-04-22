@@ -13,10 +13,17 @@ const FONT_SANS       = path.join(FONTS_DIR, 'OpenSans-Regular.ttf');
 const FONT_SANS_ITALIC= path.join(FONTS_DIR, 'OpenSans-Italic.ttf');
 
 function registerFonts(doc: PDFKit.PDFDocument) {
-  doc.registerFont('Serif',       FONT_SERIF);
-  doc.registerFont('Serif-Bold',  FONT_SERIF_BOLD);
-  doc.registerFont('Sans',        FONT_SANS);
-  doc.registerFont('Sans-Italic', FONT_SANS_ITALIC);
+  try {
+    doc.registerFont('Serif',       FONT_SERIF);
+    doc.registerFont('Serif-Bold',  FONT_SERIF_BOLD);
+    doc.registerFont('Sans',        FONT_SANS);
+    doc.registerFont('Sans-Italic', FONT_SANS_ITALIC);
+  } catch {
+    doc.registerFont('Serif',       'Helvetica');
+    doc.registerFont('Serif-Bold',  'Helvetica-Bold');
+    doc.registerFont('Sans',        'Helvetica');
+    doc.registerFont('Sans-Italic', 'Helvetica-Oblique');
+  }
 }
 
 async function fetchSvgAsPng(url: string): Promise<Buffer | null> {

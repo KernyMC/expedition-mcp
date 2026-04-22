@@ -451,10 +451,25 @@ server.registerTool(
   },
   async ({ origin, tour_id }) => {
     try {
-      const itinerary = await getItinerary(origin, tour_id);
+      let resolvedId = tour_id;
+      let itinerary;
+      try {
+        itinerary = await getItinerary(origin, tour_id);
+      } catch {
+        // tour_id may be a voyagersUrl slug — search list_tours for the real internal url
+        const tours = await listTours(origin);
+        const match = tours.find(t =>
+          t.url === tour_id ||
+          t.voyagersUrl?.includes(tour_id) ||
+          t.voyagersUrl?.endsWith('/' + tour_id)
+        );
+        if (!match) throw new Error(`Tour not found: ${tour_id}`);
+        resolvedId = match.url;
+        itinerary = await getItinerary(origin, resolvedId);
+      }
       const base64 = await generateBrochurePDF(itinerary);
       const buffer = Buffer.from(base64, 'base64');
-      const filename = `${tour_id}-brochure.pdf`;
+      const filename = `${resolvedId}-brochure.pdf`;
       const id = randomUUID();
 
       pdfStore.set(id, {

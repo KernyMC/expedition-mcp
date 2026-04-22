@@ -1,9 +1,8 @@
 import PDFDocument from 'pdfkit';
-import sharp from 'sharp';
 import path from 'path';
 import type { Itinerary, CruiseProduct } from '../api/expedition';
 
-const VOYAGERS_LOGO_URL = 'https://firebasestorage.googleapis.com/v0/b/travel-web-app-1.appspot.com/o/flamelink%2Fmedia%2Fvoyagers-travel-logo-white.svg?alt=media&token=b2f1086d-4978-4190-9350-3dd8ad41eaa1';
+const VOYAGERS_LOGO_PNG = 'https://firebasestorage.googleapis.com/v0/b/travel-web-app-1.appspot.com/o/flamelink%2Fmedia%2Fvoyagers-logo.png?alt=media&token=e59141aa-54e1-496b-b55a-21ef9ab88175';
 
 // ─── Fonts ────────────────────────────────────────────────────────────────────
 const FONTS_DIR = path.join(__dirname, 'fonts');
@@ -23,23 +22,6 @@ function registerFonts(doc: PDFKit.PDFDocument) {
     doc.registerFont('Serif-Bold',  'Helvetica-Bold');
     doc.registerFont('Sans',        'Helvetica');
     doc.registerFont('Sans-Italic', 'Helvetica-Oblique');
-  }
-}
-
-async function fetchSvgAsPng(url: string): Promise<Buffer | null> {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const svgText = await res.text();
-    // Strip <text> elements — they use web fonts unavailable on the server (render as boxes)
-    // Path-based graphics (wordmark, icon) remain intact
-    const cleanSvg = Buffer.from(svgText.replace(/<text[\s\S]*?<\/text>/gi, ''));
-    return await sharp(cleanSvg, { density: 300 })
-      .resize({ width: 540, height: 156, fit: 'inside', withoutEnlargement: false })
-      .png()
-      .toBuffer();
-  } catch {
-    return null;
   }
 }
 
@@ -167,9 +149,10 @@ function stampFooter(doc: PDFKit.PDFDocument) {
 // ─── Cruise / Ship brochure ───────────────────────────────────────────────────
 
 export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<string> {
+  const imageUrl = cruise.mainImage?.[0]?.url ?? cruise.card?.[0]?.url;
   const [imageBuf, logoBuf] = await Promise.all([
-    (cruise.mainImage?.[0]?.url ?? cruise.card?.[0]?.url) ? fetchImage(cruise.mainImage?.[0]?.url ?? cruise.card?.[0]?.url!) : Promise.resolve(null),
-    fetchSvgAsPng(VOYAGERS_LOGO_URL),
+    imageUrl ? fetchImage(imageUrl) : Promise.resolve(null),
+    fetchImage(VOYAGERS_LOGO_PNG),
   ]);
 
   return new Promise((resolve, reject) => {
@@ -186,9 +169,7 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
     doc.rect(0, 85, PW, 4).fill(GOLD);
 
     if (logoBuf) {
-      doc.image(logoBuf, M, 14, { height: 46, fit: [160, 46] });
-      doc.fill(GOLD).fontSize(7).font('Sans')
-         .text('TRAVEL', M, 63, { characterSpacing: 5 });
+      doc.image(logoBuf, M, 12, { height: 60, fit: [200, 60] });
     } else {
       doc.fill(WHITE).fontSize(22).font('Serif-Bold')
          .text('VOYAGERS', M, 20, { characterSpacing: 3 });
@@ -348,9 +329,9 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
 // ─── Tour itinerary brochure ──────────────────────────────────────────────────
 
 export async function generateBrochurePDF(itinerary: Itinerary): Promise<string> {
-  // Pre-fetch vessel images + logo
+  // Pre-fetch logo + vessel images
   const [logoBuf, ...vesselImagesList] = await Promise.all([
-    fetchSvgAsPng(VOYAGERS_LOGO_URL),
+    fetchImage(VOYAGERS_LOGO_PNG),
     ...(itinerary.cruise ?? []).filter(c => c.image).map(c => fetchImage(c.image)),
   ]);
   const vesselImages = new Map<string, Buffer | null>();
@@ -371,11 +352,8 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
     doc.rect(0, 0, PW, 88).fill(DARK);
     doc.rect(0, 85, PW, 4).fill(GOLD);
 
-    // Logo
     if (logoBuf) {
-      doc.image(logoBuf, M, 14, { height: 46, fit: [160, 46] });
-      doc.fill(GOLD).fontSize(7).font('Sans')
-         .text('TRAVEL', M, 63, { characterSpacing: 5 });
+      doc.image(logoBuf, M, 12, { height: 60, fit: [200, 60] });
     } else {
       doc.fill(WHITE).fontSize(22).font('Serif-Bold')
          .text('VOYAGERS', M, 20, { characterSpacing: 3 });

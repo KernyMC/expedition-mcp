@@ -1,15 +1,36 @@
 import PDFDocument from 'pdfkit';
 import sharp from 'sharp';
+import path from 'path';
 import type { Itinerary, CruiseProduct } from '../api/expedition';
 
 const VOYAGERS_LOGO_URL = 'https://firebasestorage.googleapis.com/v0/b/travel-web-app-1.appspot.com/o/flamelink%2Fmedia%2Fvoyagers-travel-logo-white.svg?alt=media&token=b2f1086d-4978-4190-9350-3dd8ad41eaa1';
+
+// ─── Fonts ────────────────────────────────────────────────────────────────────
+const FONTS_DIR = path.join(__dirname, 'fonts');
+const FONT_SERIF      = path.join(FONTS_DIR, 'Merriweather-Regular.ttf');
+const FONT_SERIF_BOLD = path.join(FONTS_DIR, 'Merriweather-Bold.ttf');
+const FONT_SANS       = path.join(FONTS_DIR, 'OpenSans-Regular.ttf');
+const FONT_SANS_ITALIC= path.join(FONTS_DIR, 'OpenSans-Italic.ttf');
+
+function registerFonts(doc: PDFKit.PDFDocument) {
+  doc.registerFont('Serif',       FONT_SERIF);
+  doc.registerFont('Serif-Bold',  FONT_SERIF_BOLD);
+  doc.registerFont('Sans',        FONT_SANS);
+  doc.registerFont('Sans-Italic', FONT_SANS_ITALIC);
+}
 
 async function fetchSvgAsPng(url: string): Promise<Buffer | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
-    const svg = Buffer.from(await res.arrayBuffer());
-    return await sharp(svg).png().toBuffer();
+    const svgText = await res.text();
+    // Strip <text> elements — they use web fonts unavailable on the server (render as boxes)
+    // Path-based graphics (wordmark, icon) remain intact
+    const cleanSvg = Buffer.from(svgText.replace(/<text[\s\S]*?<\/text>/gi, ''));
+    return await sharp(cleanSvg, { density: 300 })
+      .resize({ width: 540, height: 156, fit: 'inside', withoutEnlargement: false })
+      .png()
+      .toBuffer();
   } catch {
     return null;
   }
@@ -100,7 +121,7 @@ function safeText(
   x: number,
   opts: PDFKit.Mixins.TextOptions & { fontSize?: number; fontName?: string; fillColor?: string }
 ) {
-  const { fontSize = 9, fontName = 'Helvetica', fillColor = DARK, ...rest } = opts;
+  const { fontSize = 9, fontName = 'Sans', fillColor = DARK, ...rest } = opts;
   doc.fontSize(fontSize).font(fontName).fill(fillColor);
   const paragraphs = text.split('\n');
   paragraphs.forEach((para, pi) => {
@@ -117,19 +138,19 @@ function sectionBar(doc: PDFKit.PDFDocument, title: string) {
   needSpace(doc, 40);
   const y = doc.y;
   doc.rect(M, y, CW, 22).fill(DARK);
-  doc.fill(GOLD).fontSize(10).font('Helvetica-Bold')
-     .text(title.toUpperCase(), M + 8, y + 7, { width: CW - 16 });
+  doc.fill(GOLD).fontSize(9).font('Serif-Bold')
+     .text(title.toUpperCase(), M + 8, y + 7, { width: CW - 16, characterSpacing: 1 });
   doc.y = y + 28;
 }
 
 function stampFooter(doc: PDFKit.PDFDocument) {
   doc.rect(0, FOOTER_Y, PW, FOOTER_H).fill(DARK);
   doc.rect(0, FOOTER_Y, PW, 3).fill(GOLD);
-  doc.fill(WHITE).fontSize(9).font('Helvetica-Bold')
+  doc.fill(WHITE).fontSize(9).font('Sans')
      .text('voyagers.travel  ·  info@voyagers.travel', M, FOOTER_Y + 14, {
        align: 'center', width: CW,
      });
-  doc.fill(MUTED).fontSize(7.5).font('Helvetica')
+  doc.fill(MUTED).fontSize(7.5).font('Sans')
      .text(
        `Generated ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`,
        M, FOOTER_Y + 33, { align: 'center', width: CW }
@@ -147,6 +168,7 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const doc = new PDFDocument({ margin: 0, size: 'A4', bufferPages: true });
+    registerFonts(doc);
 
     doc.on('data',  (c: Buffer) => chunks.push(c));
     doc.on('end',   () => resolve(Buffer.concat(chunks).toString('base64')));
@@ -157,30 +179,32 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
     doc.rect(0, 85, PW, 4).fill(GOLD);
 
     if (logoBuf) {
-      doc.image(logoBuf, M, 16, { height: 52, fit: [180, 52] });
+      doc.image(logoBuf, M, 14, { height: 46, fit: [160, 46] });
+      doc.fill(GOLD).fontSize(7).font('Sans')
+         .text('TRAVEL', M, 63, { characterSpacing: 5 });
     } else {
-      doc.fill(WHITE).fontSize(22).font('Helvetica-Bold')
-         .text('VOYAGERS', M, 22, { characterSpacing: 3 });
-      doc.fill(GOLD).fontSize(8).font('Helvetica')
-         .text('TRAVEL', M, 47, { characterSpacing: 6 });
+      doc.fill(WHITE).fontSize(22).font('Serif-Bold')
+         .text('VOYAGERS', M, 20, { characterSpacing: 3 });
+      doc.fill(GOLD).fontSize(7).font('Sans')
+         .text('TRAVEL', M, 50, { characterSpacing: 5 });
     }
-    doc.fill(GOLD).fontSize(9).font('Helvetica')
+    doc.fill(GOLD).fontSize(8.5).font('Sans-Italic')
        .text('Expedition & Adventure Tours', 0, 38, { width: PW - M, align: 'right' });
 
     // ── TITLE BLOCK ───────────────────────────────────────────────────────────
     doc.rect(0, 89, PW, 90).fill(LIGHT);
 
     const titleFontSize = cruise.name.length > 60 ? 15 : 18;
-    doc.fill(DARK).fontSize(titleFontSize).font('Helvetica-Bold')
+    doc.fill(DARK).fontSize(titleFontSize).font('Serif-Bold')
        .text(cruise.name, M, 104, { width: CW, align: 'center' });
 
     const subtitle = [cruise.type, cruise.category, cruise.origin ? cruise.origin.charAt(0).toUpperCase() + cruise.origin.slice(1) : '']
       .filter(Boolean).join('  ·  ');
-    doc.fill(GOLD).fontSize(11).font('Helvetica')
+    doc.fill(GOLD).fontSize(11).font('Sans')
        .text(subtitle, M, 138, { width: CW, align: 'center' });
 
     if (cruise.capacity) {
-      doc.fill(MUTED).fontSize(9).font('Helvetica')
+      doc.fill(MUTED).fontSize(9).font('Sans')
          .text(`Capacity: ${cruise.capacity} passengers`, M, 158, { width: CW, align: 'center' });
     }
 
@@ -203,7 +227,7 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
     if (cruise.shortDescription) {
       const desc = stripHtml(cruise.shortDescription);
       if (desc) {
-        safeText(doc, desc, M, { width: CW, align: 'justify', fontSize: 10, fontName: 'Helvetica-Oblique', fillColor: DARK });
+        safeText(doc, desc, M, { width: CW, align: 'justify', fontSize: 10, fontName: 'Sans-Italic', fillColor: DARK });
         doc.moveDown(0.7);
       }
     }
@@ -231,7 +255,7 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
       const rightItems = cruise.specifications.slice(half);
       const startY = doc.y;
 
-      doc.fill(DARK).fontSize(9).font('Helvetica');
+      doc.fill(DARK).fontSize(9).font('Sans');
       leftItems.forEach(s => { doc.text(`- ${stripHtml(s)}`, M, doc.y, { width: colW }); });
       const afterLeft = doc.y;
 
@@ -249,7 +273,7 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
         needSpace(doc, 50);
         const cabinY = doc.y;
         doc.rect(M, cabinY, CW, 18).fill(LIGHT);
-        doc.fill(DARK).fontSize(10).font('Helvetica-Bold')
+        doc.fill(DARK).fontSize(10).font('Serif-Bold')
            .text(cabin.title ?? cabin.name ?? 'Cabin', M + 8, cabinY + 4, { width: CW - 16 });
         doc.y = cabinY + 22;
 
@@ -257,7 +281,7 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
         if (cabin.size)          parts.push(`Size: ${cabin.size}`);
         if (cabin.maxOccupancy)  parts.push(`Max occupancy: ${cabin.maxOccupancy}`);
         if (parts.length) {
-          doc.fill(MUTED).fontSize(8).font('Helvetica')
+          doc.fill(MUTED).fontSize(8).font('Sans')
              .text(parts.join('  ·  '), M, doc.y, { width: CW });
         }
         if (cabin.description) {
@@ -277,15 +301,15 @@ export async function generateCruiseBrochurePDF(cruise: CruiseProduct): Promise<
       const startY = doc.y;
 
       doc.rect(M, startY, colW, 22).fill(GREEN);
-      doc.fill(WHITE).fontSize(10).font('Helvetica-Bold')
+      doc.fill(WHITE).fontSize(10).font('Serif-Bold')
          .text("What's Included", M + 6, startY + 6, { width: colW - 8 });
 
       doc.rect(M + colW + 12, startY, colW, 22).fill(RED);
-      doc.fill(WHITE).fontSize(10).font('Helvetica-Bold')
+      doc.fill(WHITE).fontSize(10).font('Serif-Bold')
          .text('Not Included', M + colW + 18, startY + 6, { width: colW - 8 });
 
       const itemsY = startY + 28;
-      doc.fill(DARK).fontSize(9).font('Helvetica');
+      doc.fill(DARK).fontSize(9).font('Sans');
 
       doc.y = itemsY;
       incItems.forEach((item: string) => {
@@ -330,6 +354,7 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const doc = new PDFDocument({ margin: 0, size: 'A4', bufferPages: true });
+    registerFonts(doc);
 
     doc.on('data',  (c: Buffer) => chunks.push(c));
     doc.on('end',   () => resolve(Buffer.concat(chunks).toString('base64')));
@@ -341,16 +366,18 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
 
     // Logo
     if (logoBuf) {
-      doc.image(logoBuf, M, 16, { height: 52, fit: [180, 52] });
+      doc.image(logoBuf, M, 14, { height: 46, fit: [160, 46] });
+      doc.fill(GOLD).fontSize(7).font('Sans')
+         .text('TRAVEL', M, 63, { characterSpacing: 5 });
     } else {
-      doc.fill(WHITE).fontSize(22).font('Helvetica-Bold')
-         .text('VOYAGERS', M, 22, { characterSpacing: 3 });
-      doc.fill(GOLD).fontSize(8).font('Helvetica')
-         .text('TRAVEL', M, 47, { characterSpacing: 6 });
+      doc.fill(WHITE).fontSize(22).font('Serif-Bold')
+         .text('VOYAGERS', M, 20, { characterSpacing: 3 });
+      doc.fill(GOLD).fontSize(7).font('Sans')
+         .text('TRAVEL', M, 50, { characterSpacing: 5 });
     }
 
     // Tagline right-aligned
-    doc.fill(GOLD).fontSize(9).font('Helvetica')
+    doc.fill(GOLD).fontSize(8.5).font('Sans-Italic')
        .text('Expedition & Adventure Tours', 0, 38, {
          width: PW - M, align: 'right',
        });
@@ -359,10 +386,10 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
     doc.rect(0, 89, PW, 90).fill(LIGHT);
 
     const titleFontSize = itinerary.title.length > 60 ? 15 : 18;
-    doc.fill(DARK).fontSize(titleFontSize).font('Helvetica-Bold')
+    doc.fill(DARK).fontSize(titleFontSize).font('Serif-Bold')
        .text(itinerary.title, M, 104, { width: CW, align: 'center' });
 
-    doc.fill(GOLD).fontSize(11).font('Helvetica')
+    doc.fill(GOLD).fontSize(11).font('Sans')
        .text(
          `${itinerary.duration} Days  ·  ${itinerary.destination}`,
          M, 150, { width: CW, align: 'center' }
@@ -374,7 +401,7 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
     if (itinerary.shortDescription) {
       const desc = stripHtml(itinerary.shortDescription);
       if (desc) {
-        safeText(doc, desc, M, { width: CW, align: 'justify', fontSize: 10, fontName: 'Helvetica-Oblique', fillColor: DARK });
+        safeText(doc, desc, M, { width: CW, align: 'justify', fontSize: 10, fontName: 'Sans-Italic', fillColor: DARK });
         doc.moveDown(0.7);
       }
     }
@@ -392,7 +419,7 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
       const rightItems = itinerary.highlights.slice(half);
       const startY = doc.y;
 
-      doc.fill(DARK).fontSize(9).font('Helvetica');
+      doc.fill(DARK).fontSize(9).font('Sans');
       leftItems.forEach(h => { doc.text(`- ${stripHtml(h)}`, M, doc.y, { width: colW }); });
       const afterLeft = doc.y;
 
@@ -413,15 +440,15 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
       const startY = doc.y;
 
       doc.rect(M, startY, colW, 22).fill(GREEN);
-      doc.fill(WHITE).fontSize(10).font('Helvetica-Bold')
+      doc.fill(WHITE).fontSize(10).font('Serif-Bold')
          .text("What's Included", M + 6, startY + 6, { width: colW - 8 });
 
       doc.rect(M + colW + 12, startY, colW, 22).fill(RED);
-      doc.fill(WHITE).fontSize(10).font('Helvetica-Bold')
+      doc.fill(WHITE).fontSize(10).font('Serif-Bold')
          .text('Not Included', M + colW + 18, startY + 6, { width: colW - 8 });
 
       const itemsY = startY + 28;
-      doc.fill(DARK).fontSize(9).font('Helvetica');
+      doc.fill(DARK).fontSize(9).font('Sans');
 
       doc.y = itemsY;
       incItems.forEach(item => {
@@ -448,7 +475,7 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
 
         const dayY = doc.y;
         doc.rect(M, dayY, CW, 20).fill(LIGHT);
-        doc.fill(DARK).fontSize(10).font('Helvetica-Bold')
+        doc.fill(DARK).fontSize(10).font('Serif-Bold')
            .text(`Day ${day.day}  –  ${day.title}`, M + 8, dayY + 5, { width: CW - 16 });
         doc.y = dayY + 26;
 
@@ -460,7 +487,7 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
         }
 
         if (day.meals?.length) {
-          doc.fill(MUTED).fontSize(8).font('Helvetica-Oblique')
+          doc.fill(MUTED).fontSize(8).font('Sans-Italic')
              .text(`Meals: ${day.meals.join(', ')}`, M, doc.y, { width: CW });
         }
 
@@ -492,16 +519,16 @@ export async function generateBrochurePDF(itinerary: Itinerary): Promise<string>
         const textW = imgBuf ? CW - imgW - 16 : CW;
         const textY = vesselY + 10;
 
-        doc.fill(DARK).fontSize(15).font('Helvetica-Bold')
+        doc.fill(DARK).fontSize(15).font('Serif-Bold')
            .text(c.name, textX, textY, { width: textW });
 
         if (c.type) {
-          doc.fill(GOLD).fontSize(9).font('Helvetica')
+          doc.fill(GOLD).fontSize(9).font('Sans')
              .text(c.type.toUpperCase(), textX, doc.y + 4, { width: textW, characterSpacing: 1 });
         }
 
         if (c.category) {
-          doc.fill(MUTED).fontSize(9).font('Helvetica')
+          doc.fill(MUTED).fontSize(9).font('Sans')
              .text(c.category, textX, doc.y + 4, { width: textW });
         }
 

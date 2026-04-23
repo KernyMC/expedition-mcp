@@ -17,6 +17,7 @@ import {
   getDeals,
   getVoyagersTours,
   getVoyagersTourDetail,
+  getGalapagosLandTours,
 } from './api/expedition';
 import { generateBrochurePDF, generateCruiseBrochurePDF } from './pdf/brochure';
 
@@ -583,7 +584,18 @@ server.registerTool(
   },
   async ({ destination }) => {
     try {
-      const tours = await getVoyagersTours(destination);
+      let tours;
+      if (destination === 'galapagos') {
+        // Galapagos: combine land tours (getItineraries) + cruise/day tours (getTours)
+        // The page voyagers.travel/galapagos/tours shows both sections combined
+        const [landTours, cruiseTours] = await Promise.all([
+          getGalapagosLandTours(),
+          getVoyagersTours('galapagos'),
+        ]);
+        tours = [...landTours, ...cruiseTours];
+      } else {
+        tours = await getVoyagersTours(destination);
+      }
       if (!tours.length) {
         return { content: [{ type: 'text', text: `No tours found for ${destination}.` }] };
       }

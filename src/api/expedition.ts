@@ -318,6 +318,34 @@ export const getVoyagersTours = async (destination: string): Promise<VoyagersTou
   }));
 };
 
+// getItineraries — land/hotel-based tours (different from getTours which returns cruise itineraries)
+export const getGalapagosLandTours = async (): Promise<VoyagersTour[]> => {
+  const data = await graphqlFetch<{
+    getItineraries: {
+      title: string;
+      url: string;
+      duration: number;
+      type: string;
+      price: number;
+      destination: string;
+    }[];
+  }>(`{
+    getItineraries(destination:"galapagos") {
+      title url duration type price destination
+    }
+  }`);
+  return (data.getItineraries ?? []).map(t => ({
+    title:       t.title,
+    url:         t.url,
+    duration:    t.duration,
+    type:        t.type,
+    price:       t.price,
+    offer:       undefined,
+    destination: t.destination,
+    link:        buildTourLink('galapagos', t.url),
+  }));
+};
+
 export const getVoyagersTourDetail = async (destination: string, url: string): Promise<VoyagersTourDetail | null> => {
   const dest = destination.toLowerCase();
 

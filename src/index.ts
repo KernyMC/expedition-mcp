@@ -588,6 +588,15 @@ server.registerTool(
       // All destinations: use getItineraries (correct endpoint for land/vacation tours)
       // getTours(domain:voyagers.travel) is for cruise itinerary packages only
       // Galapagos also combines cruise tours since voyagers.travel/galapagos/tours shows both
+
+      // Some destinations map to different API keys (how the frontend pages query them)
+      const DEST_ALIAS: Record<string, string[]> = {
+        argentina: ['patagonia', 'costa-rica'],
+        chile:     ['patagonia'],
+        arctic:    ['antartida'],
+        polar:     ['antartida'],
+      };
+
       let tours;
       if (destination === 'galapagos') {
         const [landTours, cruiseTours] = await Promise.all([
@@ -595,6 +604,9 @@ server.registerTool(
           getVoyagersTours('galapagos'),
         ]);
         tours = [...landTours, ...cruiseTours];
+      } else if (DEST_ALIAS[destination]) {
+        const results = await Promise.all(DEST_ALIAS[destination]!.map(d => getDestinationItineraries(d)));
+        tours = results.flat();
       } else {
         tours = await getDestinationItineraries(destination);
       }

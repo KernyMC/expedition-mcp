@@ -318,8 +318,11 @@ export const getVoyagersTours = async (destination: string): Promise<VoyagersTou
   }));
 };
 
-// getItineraries — land/hotel-based tours (different from getTours which returns cruise itineraries)
-export const getGalapagosLandTours = async (): Promise<VoyagersTour[]> => {
+// getItineraries — correct endpoint for land/vacation tours on voyagers.travel
+// The frontend pages (peru, colombia, patagonia, galapagos/tours, etc.) all use getItineraries,
+// NOT getTours(domain:). getTours is only for cruise itinerary packages.
+export const getDestinationItineraries = async (destination: string): Promise<VoyagersTour[]> => {
+  const dest = destination.toLowerCase();
   const data = await graphqlFetch<{
     getItineraries: {
       title: string;
@@ -330,7 +333,7 @@ export const getGalapagosLandTours = async (): Promise<VoyagersTour[]> => {
       destination: string;
     }[];
   }>(`{
-    getItineraries(destination:"galapagos") {
+    getItineraries(destination:"${dest}") {
       title url duration type price destination
     }
   }`);
@@ -342,9 +345,12 @@ export const getGalapagosLandTours = async (): Promise<VoyagersTour[]> => {
     price:       t.price,
     offer:       undefined,
     destination: t.destination,
-    link:        buildTourLink('galapagos', t.url),
+    link:        buildTourLink(dest, t.url),
   }));
 };
+
+// Keep old name as alias for backward compat during deploy
+export const getGalapagosLandTours = () => getDestinationItineraries('galapagos');
 
 export const getVoyagersTourDetail = async (destination: string, url: string): Promise<VoyagersTourDetail | null> => {
   const dest = destination.toLowerCase();

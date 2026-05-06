@@ -81,9 +81,7 @@ export interface CruiseAvailability {
 export const listCruises = (origin = 'all') =>
   apiFetch<Cruise[]>(`/availability/cruises?origin=${origin}`);
 
-// Hardcoded Voyagers availability token (public — same as frontend)
-const VOYAGERS_AVAILABILITY_TOKEN =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlNvdXRoIEFtZXJpY2EiLCJpYXQiOjE1MTYyMzkwMjJ9.otgV3f2sJ5WnvYk6mhNRxD0goSRlyrSyUGcBIoaEZro';
+const VOYAGERS_AVAILABILITY_TOKEN = process.env.VOYAGERS_AVAILABILITY_TOKEN!;
 
 // Voyagers availability API URL format: ends with &date= (or ?date=), caller appends YYYY-MM-DD
 async function getCruiseAvailabilityUrl(slug: string): Promise<string | null> {

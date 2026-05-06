@@ -81,9 +81,98 @@ export interface CruiseAvailability {
 export const listCruises = (origin = 'all') =>
   apiFetch<Cruise[]>(`/availability/cruises?origin=${origin}`);
 
-export const getCruiseAvailability = (id: string, start?: string) => {
+// Hardcoded Voyagers availability token (public — same as frontend)
+const VOYAGERS_AVAILABILITY_TOKEN =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlNvdXRoIEFtZXJpY2EiLCJpYXQiOjE1MTYyMzkwMjJ9.otgV3f2sJ5WnvYk6mhNRxD0goSRlyrSyUGcBIoaEZro';
+
+// Voyagers availability API URL format: ends with &date= (or ?date=), caller appends YYYY-MM-DD
+async function getCruiseAvailabilityUrl(slug: string): Promise<string | null> {
+  const origins = ['galapagos', 'antarctica', 'costa-rica'];
+  for (const origin of origins) {
+    try {
+      const data = await graphqlFetch<{
+        getCruise: { availabilityUrl: string } | null;
+      }>(`{ getCruise(origin:"${origin}" url:"${slug}" id:"") { availabilityUrl } }`);
+      const url = data.getCruise?.availabilityUrl;
+      if (url) return url;
+    } catch {
+      // try next origin
+    }
+  }
+  return null;
+}
+
+interface VoyagersAvailabilityItem {
+  cruise: string;
+  itinerary: string;
+  cabin_type: string;
+  days: number;
+  nights: number;
+  start: string;
+  end: string;
+  spaces: number;
+  hold: number;
+  rackRate: number;
+  promotion?: string;
+  promotionalRate?: number | null;
+  cabins?: { type: string; available: number; hold: number }[];
+}
+
+async function fetchVoyagersAvailabilityDates(availabilityUrl: string): Promise<CruiseDate[]> {
+  // Normalize host: latintrails → voyagers.travel
+  const base = availabilityUrl.replace('app.latintrails.com', 'app.voyagers.travel');
+  const today = new Date().toISOString().slice(0, 10);
+  const nextYear = `${new Date().getFullYear() + 1}-01-01`;
+
+  async function fetchOne(date: string): Promise<VoyagersAvailabilityItem[]> {
+    const url = `${base}${date}&allYear=true&groupDates=true`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${VOYAGERS_AVAILABILITY_TOKEN}` },
+    });
+    if (!res.ok) return [];
+    const json = await res.json() as VoyagersAvailabilityItem[] | { dates?: VoyagersAvailabilityItem[] };
+    return Array.isArray(json) ? json : (json.dates ?? []);
+  }
+
+  const [a, b] = await Promise.all([fetchOne(today), fetchOne(nextYear)]);
+
+  // Deduplicate by start+end key, prefer item with more spaces
+  const map = new Map<string, VoyagersAvailabilityItem>();
+  for (const item of [...a, ...b]) {
+    const key = `${item.start}|${item.end}`;
+    if (!map.has(key) || item.spaces > map.get(key)!.spaces) map.set(key, item);
+  }
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  return [...map.values()]
+    .filter(item => item.start >= todayStr)
+    .sort((a, b) => a.start.localeCompare(b.start))
+    .map(item => ({
+      startDate:       item.start,
+      endDate:         item.end,
+      days:            item.days,
+      nights:          item.nights,
+      spaces:          item.spaces,
+      rackRate:        item.rackRate,
+      cabins:          (item.cabins ?? []).map(c => ({ type: c.type, available: c.available, hold: c.hold })),
+      promotionalRate: item.promotionalRate ?? undefined,
+      promotionDetails: item.promotion,
+      itinerary:       item.itinerary,
+    }));
+}
+
+export const getCruiseAvailability = async (id: string, start?: string): Promise<CruiseAvailability> => {
   const startParam = start ?? new Date().toISOString().slice(0, 7) + '-01';
-  return apiFetch<CruiseAvailability>(`/availability/cruise/${id}?start=${startParam}`);
+  const primary = await apiFetch<CruiseAvailability>(`/availability/cruise/${id}?start=${startParam}`);
+
+  if (primary.dates.length > 0) return primary;
+
+  // Fallback: Voyagers availability API (has data for ships like Natural Paradise)
+  const availabilityUrl = await getCruiseAvailabilityUrl(id);
+  if (!availabilityUrl) return primary;
+
+  const dates = await fetchVoyagersAvailabilityDates(availabilityUrl);
+  return { ...primary, dates };
 };
 
 // ─── Hotels ─────────────────────────────────────────────────────────────────

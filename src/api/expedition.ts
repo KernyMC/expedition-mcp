@@ -506,6 +506,67 @@ export const getVoyagersTourDetail = async (destination: string, url: string): P
   };
 };
 
+// ─── GraphQL cruise fallback (for generate_brochure when expedition API lacks itinerary) ──
+
+const GQL_ORIGINS = ['galapagos', 'antartida', 'costa-rica', 'ecuador', 'amazon'];
+
+export const getCruiseBySlugGraphQL = async (slug: string): Promise<CruiseProduct | null> => {
+  for (const origin of GQL_ORIGINS) {
+    try {
+      const data = await graphqlFetch<{
+        getCruise: {
+          id: string;
+          name: string;
+          capacity: number;
+          origin: string;
+          type: string;
+          category: string;
+          shortDescription: string;
+          description: string;
+          specifications: { specification: string }[];
+          cruiseIncludes: { include: string }[];
+          cruiseDoesNotInclude: { notInclude: string }[];
+          cabins: { title?: string; name?: string; size?: string; maxOccupancy?: number; description?: string }[];
+          mainImage: { url: string }[];
+          card: { url: string }[];
+        } | null;
+      }>(`{
+        getCruise(origin:"${origin}" url:"${slug}" id:"") {
+          id name capacity origin type category
+          shortDescription description
+          specifications { specification }
+          cruiseIncludes { include }
+          cruiseDoesNotInclude { notInclude }
+          cabins { title size maxOccupancy description }
+          mainImage { url }
+          card { url }
+        }
+      }`);
+      const c = data.getCruise;
+      if (!c?.name) continue;
+      return {
+        id:               c.id,
+        name:             c.name,
+        capacity:         c.capacity,
+        origin:           c.origin,
+        type:             c.type,
+        category:         c.category,
+        shortDescription: c.shortDescription,
+        description:      c.description,
+        specifications:   (c.specifications ?? []).map(s => s.specification).filter(Boolean),
+        includes:         (c.cruiseIncludes ?? []).map(i => i.include).filter(Boolean),
+        notInclude:       (c.cruiseDoesNotInclude ?? []).map(i => i.notInclude).filter(Boolean),
+        cabins:           c.cabins ?? [],
+        mainImage:        c.mainImage ?? [],
+        card:             c.card ?? [],
+      };
+    } catch {
+      // try next origin
+    }
+  }
+  return null;
+};
+
 const DEALS_ORIGIN_MAP: Record<string, 'galapagos' | 'antartida' | 'ecuador'> = {
   galapagos:  'galapagos',
   antarctica: 'antartida',

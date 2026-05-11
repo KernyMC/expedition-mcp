@@ -19,6 +19,7 @@ import {
   getVoyagersTourDetail,
   getGalapagosLandTours,
   getDestinationItineraries,
+  getCruiseBySlugGraphQL,
 } from './api/expedition';
 import { generateBrochurePDF, generateCruiseBrochurePDF } from './pdf/brochure';
 
@@ -445,53 +446,97 @@ server.registerTool(
   'generate_brochure',
   {
     description:
-      'Generate a PDF brochure for a tour and return a download URL. Use this only when the user explicitly requests a brochure or PDF download. You must call list_tours first to get the exact "url" value to pass as tour_id.',
+      'Generate a PDF brochure for a tour and return a download URL. Use this only when the user explicitly requests a brochure or PDF download. ' +
+      'IMPORTANT: When the user asks for a brochure after discussing a specific availability entry (ship + dates), you MUST pass the context you already have: ' +
+      'use duration_days from the availability data (e.g. 7 or 8) and itinerary_code from the "itinerary" field in the availability date (e.g. "C", "B", "A"). ' +
+      'This ensures the brochure matches exactly what the user was looking at, not a different itinerary of the same ship. ' +
+      'You do NOT need to call list_tours first — pass the ship slug as tour_id and let the tool resolve it.',
     inputSchema: {
       origin: z.enum(['galapagos', 'antarctica', 'costa-rica']).describe('Destination origin'),
-      tour_id: z.string().describe('The exact "url" value returned by list_tours — not the title'),
+      tour_id: z.string().describe('Ship slug from list_cruises or get_cruise_availability (e.g. "eden", "infinity"). The tool resolves it automatically.'),
+      duration_days: z.number().optional().describe('Trip duration in days from the availability entry (e.g. 7, 8). Used to pick the correct itinerary when multiple exist for the same ship.'),
+      itinerary_code: z.string().optional().describe('Itinerary code letter from the availability "itinerary" field (e.g. "C", "B", "A", "C1"). Used to pick the exact matching tour.'),
     },
   },
-  async ({ origin, tour_id }) => {
+  async ({ origin, tour_id, duration_days, itinerary_code }) => {
+    // ── Attempt 1: expedition API direct ─────────────────────────────────────
+    let itinerary;
+    let resolvedId = tour_id;
     try {
-      let resolvedId = tour_id;
-      let itinerary;
+      itinerary = await getItinerary(origin, tour_id);
+    } catch {
+      // ── Attempt 2: match in list_tours using ship slug + optional hints ───
       try {
-        itinerary = await getItinerary(origin, tour_id);
-      } catch {
-        // tour_id may be a voyagersUrl slug — search list_tours for the real internal url
         const tours = await listTours(origin);
-        const match = tours.find(t =>
+        // All tours for this ship slug
+        const candidates = tours.filter(t =>
           t.url === tour_id ||
-          t.voyagersUrl?.includes(tour_id) ||
+          t.url.startsWith(tour_id + '-') ||
+          t.voyagersUrl?.includes('/' + tour_id) ||
           t.voyagersUrl?.endsWith('/' + tour_id)
         );
-        if (!match) throw new Error(`Tour not found: ${tour_id}`);
-        resolvedId = match.url;
-        itinerary = await getItinerary(origin, resolvedId);
+
+        let match = candidates[0]; // default: first match
+
+        if (candidates.length > 1) {
+          // Narrow by itinerary code (e.g. "C" → url contains "itinerary-c")
+          if (itinerary_code) {
+            const codeSlug = 'itinerary-' + itinerary_code.toLowerCase().replace(/\s+/g, '-');
+            const byCode = candidates.find(t => t.url.includes(codeSlug));
+            if (byCode) match = byCode;
+          }
+          // Narrow by duration (e.g. 7 days → url contains "7-days")
+          if (!match || (itinerary_code && !match.url.includes('itinerary-' + itinerary_code.toLowerCase()))) {
+            if (duration_days) {
+              const byDuration = candidates.find(t =>
+                t.url.includes(`${duration_days}-day`) || t.duration === duration_days
+              );
+              if (byDuration) match = byDuration;
+            }
+          }
+        }
+
+        if (match) {
+          resolvedId = match.url;
+          itinerary = await getItinerary(origin, resolvedId);
+        }
+      } catch {
+        // continue to GraphQL fallback
       }
-      const base64 = await generateBrochurePDF(itinerary);
-      const buffer = Buffer.from(base64, 'base64');
-      const filename = `${resolvedId}-brochure.pdf`;
-      const id = randomUUID();
-
-      pdfStore.set(id, {
-        buffer,
-        filename,
-        title: itinerary.title,
-        expiresAt: Date.now() + 30 * 60 * 1000, // 30 minutes
-      });
-
-      const downloadUrl = `${PUBLIC_URL}/pdf/${id}`;
-
-      return {
-        content: [{ type: 'text', text: `Brochure ready. Download URL: ${downloadUrl}` }],
-      };
-    } catch (err) {
-      return {
-        content: [{ type: 'text', text: `Error generating brochure: ${err instanceof Error ? err.message : String(err)}` }],
-        isError: true,
-      };
     }
+
+    if (itinerary) {
+      try {
+        const base64 = await generateBrochurePDF(itinerary);
+        const buffer = Buffer.from(base64, 'base64');
+        const filename = `${resolvedId}-brochure.pdf`;
+        const id = randomUUID();
+        pdfStore.set(id, { buffer, filename, title: itinerary.title, expiresAt: Date.now() + 30 * 60 * 1000 });
+        return { content: [{ type: 'text', text: `Brochure ready. Download URL: ${PUBLIC_URL}/pdf/${id}` }] };
+      } catch (err) {
+        return { content: [{ type: 'text', text: `Error generating brochure PDF: ${err instanceof Error ? err.message : String(err)}` }], isError: true };
+      }
+    }
+
+    // ── Attempt 3: GraphQL getCruise by slug → ship profile brochure ─────────
+    try {
+      const cruise = await getCruiseBySlugGraphQL(tour_id);
+      if (cruise) {
+        const base64 = await generateCruiseBrochurePDF(cruise);
+        const buffer = Buffer.from(base64, 'base64');
+        const filename = `${tour_id}-brochure.pdf`;
+        const id = randomUUID();
+        pdfStore.set(id, { buffer, filename, title: cruise.name, expiresAt: Date.now() + 30 * 60 * 1000 });
+        return { content: [{ type: 'text', text: `Ship brochure ready. Download URL: ${PUBLIC_URL}/pdf/${id}` }] };
+      }
+    } catch {
+      // fall through
+    }
+
+    return {
+      content: [{ type: 'text', text: `Tour not found: ${tour_id}. Could not locate itinerary or ship data in expedition API or GraphQL.` }],
+      isError: true,
+    };
   }
 );
 

@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import path from 'path';
+import fs from 'fs';
 import type { Itinerary, CruiseProduct } from '../api/expedition';
 
 const VOYAGERS_LOGO_PNG = 'https://firebasestorage.googleapis.com/v0/b/travel-web-app-1.appspot.com/o/flamelink%2Fmedia%2Fvoyagers-logo.png?alt=media&token=e59141aa-54e1-496b-b55a-21ef9ab88175';
@@ -12,12 +13,15 @@ const FONT_SANS       = path.join(FONTS_DIR, 'OpenSans-Regular.ttf');
 const FONT_SANS_ITALIC= path.join(FONTS_DIR, 'OpenSans-Italic.ttf');
 
 function registerFonts(doc: PDFKit.PDFDocument) {
-  try {
+  const customFontsAvailable = [FONT_SERIF, FONT_SERIF_BOLD, FONT_SANS, FONT_SANS_ITALIC]
+    .every(f => fs.existsSync(f));
+
+  if (customFontsAvailable) {
     doc.registerFont('Serif',       FONT_SERIF);
     doc.registerFont('Serif-Bold',  FONT_SERIF_BOLD);
     doc.registerFont('Sans',        FONT_SANS);
     doc.registerFont('Sans-Italic', FONT_SANS_ITALIC);
-  } catch {
+  } else {
     doc.registerFont('Serif',       'Helvetica');
     doc.registerFont('Serif-Bold',  'Helvetica-Bold');
     doc.registerFont('Sans',        'Helvetica');

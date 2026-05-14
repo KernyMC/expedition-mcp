@@ -7,10 +7,10 @@ const VOYAGERS_LOGO_PNG = 'https://firebasestorage.googleapis.com/v0/b/travel-we
 
 // ─── Fonts ────────────────────────────────────────────────────────────────────
 const FONTS_DIR = path.join(__dirname, 'fonts');
-const FONT_SERIF      = path.join(FONTS_DIR, 'Merriweather-Regular.ttf');
-const FONT_SERIF_BOLD = path.join(FONTS_DIR, 'Merriweather-Bold.ttf');
-const FONT_SANS       = path.join(FONTS_DIR, 'OpenSans-Regular.ttf');
-const FONT_SANS_ITALIC= path.join(FONTS_DIR, 'OpenSans-Italic.ttf');
+const FONT_SERIF      = path.join(FONTS_DIR, 'Merriweather-Regular.woff');
+const FONT_SERIF_BOLD = path.join(FONTS_DIR, 'Merriweather-Bold.woff');
+const FONT_SANS       = path.join(FONTS_DIR, 'OpenSans-Regular.woff');
+const FONT_SANS_ITALIC= path.join(FONTS_DIR, 'OpenSans-Italic.woff');
 
 function registerFonts(doc: PDFKit.PDFDocument) {
   const customFontsAvailable = [FONT_SERIF, FONT_SERIF_BOLD, FONT_SANS, FONT_SANS_ITALIC]

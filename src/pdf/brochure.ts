@@ -50,9 +50,10 @@ const SAFE_Y   = FOOTER_Y - 8;
 
 // ─── HTML stripping ───────────────────────────────────────────────────────────
 
-function stripHtml(raw: string | null | undefined): string {
-  if (!raw) return '';
-  return raw
+function stripHtml(raw: unknown): string {
+  if (raw == null || raw === '') return '';
+  if (typeof raw !== 'string') raw = String(raw);
+  return (raw as string)
     .replace(/<\/(p|div|h[1-6]|li|tr|td|th|section|article|blockquote)>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<[^>]*>/g, '')
